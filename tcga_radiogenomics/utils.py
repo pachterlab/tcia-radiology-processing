@@ -38,7 +38,7 @@ SERIES_DESCRIPTION_KEYWORDS_EXCLUDE_RADIOMICS = [
 
 seg_mask_number_to_label = {
     0: "Background",
-    1: "Kidney",
+    1: "Organ",
     2: "Tumor",
     3: "Cyst",
 }
@@ -1321,7 +1321,7 @@ def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogeno
     input_df.to_csv(output_csv_path, index=False)
     logger.info(f"Saved radiogenomics imaging DataFrame for {len(input_df)} series to {output_csv_path}")
 
-def perform_pyradiomics_on_single_image_and_mask(image_file, segmentation_file, params=None, label=1):
+def perform_pyradiomics_on_single_image_and_mask(image_file, segmentation_file, params=None, label="1,2"):
     def label_is_int(label):
         try:
             _ = int(label)
@@ -1357,7 +1357,7 @@ def perform_pyradiomics_on_single_image_and_mask(image_file, segmentation_file, 
 
     return dict(features)
 
-def perform_radiomics_pipeline(input_csv_path, output_csv_path, threads=1, param=None, image_column="Image", mask_column="Mask", label=None, overwrite=False):
+def perform_radiomics_pipeline(input_csv_path, output_csv_path, threads=1, param=None, image_column="Image", mask_column="Mask", label="1,2", overwrite=False):
     """
     Expected input_csv_path to have 2 columns: {image_column} and {mask_column}
     """
@@ -2063,17 +2063,17 @@ def create_totalseg_scirep_dice_histograms(totalseg_dir, scirep_dir, segmentatio
                 axes[0].axis("off")
                 
                 # Middle: image + mask overlay
-                n_kidney_pixels = np.sum(totalsegmentator_mask[:, :, z] > 0)
+                n_organ_pixels = np.sum(totalsegmentator_mask[:, :, z] > 0)
                 axes[1].imshow(np.rot90(img[:, :, z]), cmap="gray", vmin=vmin, vmax=vmax)  # rotate 90 degrees for correct orientation
                 axes[1].imshow(np.rot90(totalsegmentator_mask[:, :, z] > 0), cmap="Reds", alpha=0.2)
-                axes[1].set_title(f"Image + kidney mask totalsegmentator ({n_kidney_pixels} kidney pixels)")
+                axes[1].set_title(f"Image + organ mask totalsegmentator ({n_organ_pixels} organ pixels)")
                 axes[1].axis("off")
 
                 # Right: image + TCGA mask overlay
-                n_kidney_pixels = np.sum(scirep_mask_ai[:, :, z] > 0)
+                n_organ_pixels = np.sum(scirep_mask_ai[:, :, z] > 0)
                 axes[2].imshow(np.rot90(img[:, :, z]), cmap="gray", vmin=vmin, vmax=vmax)  # rotate 90 degrees for correct orientation
                 axes[2].imshow(np.rot90(scirep_mask_ai[:, :, z] > 0), cmap="Reds", alpha=0.2)
-                axes[2].set_title(f"Image + kidney mask SciRep ({n_kidney_pixels} kidney pixels)")
+                axes[2].set_title(f"Image + organ mask SciRep ({n_organ_pixels} organ pixels)")
                 axes[2].axis("off")
 
                 plt.suptitle(f"Axial slice {z}")
