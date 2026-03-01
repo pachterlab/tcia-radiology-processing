@@ -1,0 +1,13 @@
+name: tcga_ct
+channels:
+  - bioconda
+  - pytorch
+  - conda-forge
+  - nvidia
+  - defaults
+dependencies:
+  - python==3.10
+  - pip
+  - tree
+  - pip:
+      - .

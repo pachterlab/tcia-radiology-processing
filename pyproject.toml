@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tcga_radiogenomics"
+version = "0.1.0"
+description = "TCGA CT Processing Protocol."
+readme = {file = "README.md", content-type = "text/markdown"}
+license = {file = "LICENSE"}
+authors = [
+    {name = "Joseph Rich", email = "josephrich98@gmail.com"}
+]
+maintainers = [
+    {name = "Joseph Rich", email = "josephrich98@gmail.com"}
+]
+requires-python = ">=3.10"
+keywords = ["AI", "bioinformatics", "deep learning", "medicine", "radiology"]
+classifiers = [
+    "Environment :: Console",
+    "Framework :: Jupyter",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Utilities"
+]
+dependencies = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "tqdm",
+    "torchvision",
+    "pydicom",
+    "highdicom",
+    "nibabel",
+    "scipy",
+    "simpleitk",
+    "ipython",
+    "ipywidgets",
+    "TotalSegmentator",
+    "dcm2niix"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/pachterlab/tcga-ct-processing-protocol"
+
+[tool.setuptools.packages.find]
+where = ["."]
