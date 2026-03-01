@@ -5,15 +5,15 @@
 To run the code in this repository, follow these steps:
 
 ```sh
-git clone https://github.com/pachterlab/tcga-ct-processing-protocol.git
-cd tcga-ct-processing-protocol
+git clone https://github.com/pachterlab/tcga-radiogenomics.git
+cd tcga-radiogenomics
 ```
 
 We recommend using an environment manager such as conda. Some additional non-python packages must be installed for full functionality. If using conda (recommended), simply run the following:
 
 ```sh
 conda env create -f environment.yml
-conda activate tcga_ct
+conda activate tcga_radiogenomics
 ```
 
 Otherwise, install these packages manually as-needed (see environment.yml for the list of packages and recommended versions).

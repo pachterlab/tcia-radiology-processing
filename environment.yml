@@ -1,4 +1,4 @@
-name: tcga_ct
+name: tcga_radiogenomics
 channels:
   - bioconda
   - pytorch

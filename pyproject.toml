@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tcga_radiogenomics"
 version = "0.1.0"
-description = "TCGA CT Processing Protocol."
+description = "TCGA Radiogenomics."
 readme = {file = "README.md", content-type = "text/markdown"}
 license = {file = "LICENSE"}
 authors = [
@@ -42,13 +42,15 @@ dependencies = [
     "scipy",
     "simpleitk",
     "ipython",
+    "ipykernel",
     "ipywidgets",
     "TotalSegmentator",
-    "dcm2niix"
+    "dcm2niix",
+    "pyradiomics"
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/pachterlab/tcga-ct-processing-protocol"
+"Homepage" = "https://github.com/pachterlab/tcga-radiogenomics"
 
 [tool.setuptools.packages.find]
 where = ["."]

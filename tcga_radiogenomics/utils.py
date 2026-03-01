@@ -1246,7 +1246,7 @@ def get_number_of_voxels_and_number_of_slices(mask_path):
     num_slices = mask_data.shape[2]  # assuming slices are along the third dimension
     return num_voxels, num_slices
 
-def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogenomics_imaging_data.csv", imaging_file_name="imaging.nii.gz", mask_file_name="segmentation.nii.gz", metadata_df=None, metadata_df_columns_to_merge=None, series_description_keywords_exclude=None, overwrite=False):
+def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogenomics_imaging_data.csv", imaging_file_name="imaging.nii.gz", mask_file_name="segmentation.nii.gz", metadata_df=None, metadata_df_columns_to_merge=None, series_description_keywords_exclude="default", overwrite=False):
     """
     Expected structure of raw_image_data_dir:
     raw_image_data_dir/CASE_ID/
@@ -1309,6 +1309,10 @@ def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogeno
             metadata_df = metadata_df[["caseID"] + metadata_df_columns_to_merge]
         input_df = input_df.merge(metadata_df, on="caseID", how="left")
     
+    if series_description_keywords_exclude == "default":
+        logger.info(f"Using default series description keywords to exclude for radiomics: {SERIES_DESCRIPTION_KEYWORDS_EXCLUDE_RADIOMICS}. To disable this filtering, set series_description_keywords_exclude to None.")
+        series_description_keywords_exclude = SERIES_DESCRIPTION_KEYWORDS_EXCLUDE_RADIOMICS
+
     if "Series Description" in input_df.columns and series_description_keywords_exclude is not None:
         pattern = "|".join(series_description_keywords_exclude)
         exclude_mask = input_df["Series Description"].str.contains(pattern, case=False, na=False)
