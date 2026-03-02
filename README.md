@@ -1,4 +1,4 @@
-# RRPP_2026
+# TCGA Radiogenomics Processing Protocol
 
 ## Getting Started
 
@@ -16,17 +16,16 @@ conda env create -f environment.yml
 conda activate tcga_radiogenomics
 ```
 
-Otherwise, install these packages manually as-needed (see environment.yml for the list of packages and recommended versions).
+Otherwise, install these packages manually as-needed (see environment.yml and pyproject.toml for the list of packages and recommended versions).
 
-For development, explicitely install the package in editable mode with the following command:
+(Optional) For development, explicitely install the package in editable mode with the following command:
 
 ```sh
 pip install -e .
 ```
 
-<!-- pip install .[dev,analysis]
-pip install versioneer
-pip install pyradiomics --no-build-isolation -->
+## Notebooks
+See the [notebooks](notebooks) directory for the data processing protocol in a Jupyter notebook format.
 
 ## License  
 This project is licensed under the **BSD 2-Clause License**. See the [LICENSE](LICENSE) file for details.
