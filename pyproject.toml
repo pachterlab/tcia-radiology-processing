@@ -46,7 +46,8 @@ dependencies = [
     "ipywidgets",
     "TotalSegmentator",
     "dcm2niix",
-    "pyradiomics"
+    "pyradiomics",
+    "openpyxl"
 ]
 
 [project.urls]
