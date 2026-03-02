@@ -11,6 +11,7 @@ import zipfile
 
 import highdicom as hd
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 import nibabel as nib
 import numpy as np
 import pandas as pd
@@ -2265,17 +2266,21 @@ def check_few_slices(metadata_df, nifti_dir, image_filename="imaging.nii.gz"):
     return metadata_df
 
 
-def view_dicom_file(dicom_file, title=None, vmin=-200, vmax=300):
+def view_dicom_file(dicom_file, title="default", vmin=-200, vmax=300, out_path=None):
     print(f"Viewing DICOM file: {dicom_file}")
     if not dicom_file.lower().endswith(".dcm"):
         print(f"Warning: {dicom_file} does not have a .dcm extension, but will attempt to read as DICOM.")
     dcm = pydicom.dcmread(dicom_file)
     plt.imshow(dcm.pixel_array, cmap="gray", vmin=vmin, vmax=vmax)
     plt.colorbar()
-    if title is None:
+    if title == "default":
         title = f'DICOM {os.path.basename(dicom_file).split(".")[0]}'
-    plt.title(title)
+    if title:
+        plt.title(title)
     plt.axis("off")
+    if out_path:
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        plt.savefig(out_path, bbox_inches='tight', dpi=300)
     plt.show()
 
 
@@ -2302,15 +2307,15 @@ def view_dicom_directory(dicom_dir, vmin=None, vmax=None):
             plt.show()
         interact(show_slice, i=(0, volume.shape[0]-1));
 
-def view_dicom(dicom_path, vmin=None, vmax=None):
+def view_dicom(dicom_path, vmin=None, vmax=None, title="default", out_path=None):
     if os.path.isfile(dicom_path):
-        view_dicom_file(dicom_path, vmin=vmin, vmax=vmax)
+        view_dicom_file(dicom_path, title=title, vmin=vmin, vmax=vmax, out_path=out_path)
     elif os.path.isdir(dicom_path):
         view_dicom_directory(dicom_path, vmin=vmin, vmax=vmax)
     else:
         raise ValueError(f"Path {dicom_path} is neither a file nor a directory.")
 
-def view_nifti(nifti_file, z=None, title=None, vmin=None, vmax=None):
+def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overlay_mask=None, out_path=None, _out_dir=None):
     nii = nib.load(nifti_file)
     volume = nii.get_fdata()
 
@@ -2320,11 +2325,22 @@ def view_nifti(nifti_file, z=None, title=None, vmin=None, vmax=None):
     nz = volume.shape[2]
 
     volume = np.rot90(volume)
+    if overlay_mask is not None:
+        cmap = ListedColormap([
+            (0, 0, 0, 0),      # 0 = transparent
+            (1, 0, 0, 0.7),    # 1 = light red (RGBA)
+            (1, 0, 0, 0.9)     # 2 = darker red
+        ])
+        mask = nib.load(overlay_mask).get_fdata()
+        mask = np.rot90(mask)
+        assert mask.shape == volume.shape, "Mask and image shapes do not match"
     if z is None:
         # view volume
         def show_slice(z):
             plt.figure(figsize=(6,6))
             plt.imshow(volume[:, :, z], cmap="gray", vmin=vmin, vmax=vmax)
+            if overlay_mask is not None:
+                plt.imshow(mask[:, :, z], cmap=cmap, alpha=0.3)
             plt.axis("off")
             if title:
                 plt.title(title)
@@ -2337,8 +2353,21 @@ def view_nifti(nifti_file, z=None, title=None, vmin=None, vmax=None):
 
         plt.imshow(volume[:, :, z], cmap="gray", vmin=vmin, vmax=vmax)
         plt.colorbar()
-        if title is None:
+        if overlay_mask is not None:
+            plt.imshow(mask[:, :, z], cmap=cmap, alpha=0.3)
+        if title == "default":
             title = f"NIfTI slice {z}"
-        plt.title(title)
+        if title:
+            plt.title(title)
         plt.axis("off")
+        if out_path is True:
+            # save at nifti_file, but replace .nii/.nii.gz with _slice{z}.png
+            out_path = nifti_file.replace(".nii.gz", f"_slice{z:03d}.png").replace(".nii", f"_slice{z:03d}.png")
+            if overlay_mask is not None:
+                out_path = out_path.replace(".png", "_with_mask.png")
+            if _out_dir is not None:
+                out_path = os.path.join(_out_dir, os.path.basename(out_path))
+        if out_path:
+            os.makedirs(os.path.dirname(out_path), exist_ok=True)
+            plt.savefig(out_path, bbox_inches='tight', dpi=300)
         plt.show()
