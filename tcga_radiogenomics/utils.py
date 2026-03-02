@@ -373,7 +373,7 @@ def check_bad_series_description(json_path):  # return True if bad, False if goo
         return True
     return False
 
-def is_viable_dicom_series(dicom_folder, min_files=5, max_thickness_mm=10):
+def is_viable_dicom_series(dicom_folder, min_files=5, max_thickness_mm=10, include_kernel_keywords=True):
     """
     Determine whether a DICOM folder contains a usable CT volume.
 
@@ -400,6 +400,9 @@ def is_viable_dicom_series(dicom_folder, min_files=5, max_thickness_mm=10):
         return False, f"Failed to read DICOM: {e}"
 
     # --- Check ImageType keywords ---
+    bad_series_keywords = BAD_SERIES_KEYWORD
+    if include_kernel_keywords:
+        bad_series_keywords = bad_series_keywords.union(set(SERIES_DESCRIPTION_KEYWORDS_EXCLUDE_RADIOMICS))
     for dicom_header in ["ImageType", "SeriesDescription", "ProtocolName"]:
         tokens = []
         if hasattr(dcm, dicom_header):
@@ -444,7 +447,7 @@ def make_series_to_folder_mapping(dcm_dir):
     
     return series_to_folder
 
-def add_viable_info(dcm_dir, metadata_csv, min_files=5, max_thickness_mm=10, out=None, overwrite=False):
+def add_viable_info(dcm_dir, metadata_csv, min_files=5, max_thickness_mm=10, out=None, overwrite=False, include_kernel_keywords=True):
     if isinstance(metadata_csv, str):
         metadata_df = pd.read_csv(metadata_csv)
     elif isinstance(metadata_csv, pd.DataFrame):
@@ -472,7 +475,7 @@ def add_viable_info(dcm_dir, metadata_csv, min_files=5, max_thickness_mm=10, out
             continue
         
         dicom_folder = series_to_folder[series_uid]
-        is_viable, reason = is_viable_dicom_series(dicom_folder, min_files=min_files, max_thickness_mm=max_thickness_mm)
+        is_viable, reason = is_viable_dicom_series(dicom_folder, min_files=min_files, max_thickness_mm=max_thickness_mm, include_kernel_keywords=include_kernel_keywords)
         if not is_viable:
             logger.debug(f"Series UID {series_uid} for case {case_id} is not viable: {reason}")
         case_viable.append(is_viable)
@@ -2257,7 +2260,7 @@ def check_few_slices(metadata_df, nifti_dir, image_filename="imaging.nii.gz"):
         if is_4d_case:
             # erase folder
             if os.path.exists(case_dir):
-                logger.warning(f"Case {case_id} appears to have 4D NIfTI image. This may indicate a DICOM series with multiple time points or phases that was incorrectly converted to a single 4D NIfTI file. Please review the original DICOM data for this case to determine if it should be split into separate series for each phase/time point. For now, this case will be marked as 4D in the metadata and may need special handling in downstream processing.")
+                logger.warning(f"Case {case_id} appears to have 4D NIfTI image. This may indicate a DICOM series with multiple time points or phases that was incorrectly converted to a single 4D NIfTI file. Please review the original DICOM data for this case to determine if it should be split into separate series for each phase/time point. For now, this case will be marked as 4D in the metadata and removed from the dataset.")
                 shutil.rmtree(case_dir, ignore_errors=True)
     
     # merge is_4d info back to metadata_df by caseID
