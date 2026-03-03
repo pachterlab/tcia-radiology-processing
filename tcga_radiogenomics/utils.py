@@ -236,7 +236,6 @@ def normalize_intensity(
         - "volume"  → normalize each volume independently
         - "dataset" → compute global mean/std across all volumes
     """
-
     if normalization_method not in ["volume", "dataset"]:
         raise ValueError("normalization_method must be 'volume' or 'dataset'")
 
@@ -278,6 +277,13 @@ def normalize_intensity(
             image_path = None
         else:
             raise ValueError(f"Unsupported type {type(img_input)}")
+        
+        if out is True:
+            if not isinstance(image_path, str):
+                raise ValueError(f"Expected a file path for output when out=True, got {type(image_path)}")
+            out = image_path.replace(".nii", "_normalized.nii")
+            if not out.endswith(".gz"):
+                out += ".gz"
 
         arr = sitk.GetArrayFromImage(img).astype(np.float32)
 
@@ -298,17 +304,10 @@ def normalize_intensity(
 
         # Handle output
         if out:
-            if image_path is None:
-                raise ValueError("Cannot auto-generate filename from sitk.Image input")
+            if not os.path.exists(out) or overwrite:
+                sitk.WriteImage(img_norm, out)
 
-            out_path = image_path.replace(".nii", "_normalized.nii")
-            if not out_path.endswith(".gz"):
-                out_path += ".gz"
-
-            if not os.path.exists(out_path) or overwrite:
-                sitk.WriteImage(img_norm, out_path)
-
-            outputs.append(out_path)
+            outputs.append(out)
         else:
             outputs.append(img_norm)
 
@@ -1065,12 +1064,11 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
             logger.warning(f"NIfTI directory not found for caseID {caseID} at {nifti_case_dir}")
             continue
 
+        modality = "CT"
         if metadata_df is not None:
             row = metadata_df[metadata_df['caseID'] == caseID]
             if not row.empty:
                 modality = row['Modality'].values[0]
-            else:
-                modality = "CT"
 
         #* run TotalSegmentator
         image_file = os.path.join(nifti_case_dir, image_filename)
@@ -1138,6 +1136,21 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
             else:
                 logger.info(f"Combining organ and tumor segmentations for caseID {caseID}...")
                 tumor_nii = nib.load(tumor_segmentation_file)
+
+                union_orient = nib.orientations.aff2axcodes(union_nii.affine)
+                tumor_orient = nib.orientations.aff2axcodes(tumor_nii.affine)
+                if tumor_orient != union_orient:
+                    logger.debug(f"Reorienting tumor mask from {tumor_orient} to match organ masks orientation {union_orient}")
+                    # use tumor as reference
+                    if tumor_orient == ('R', 'A', 'S'):
+                        union_nii = nib.as_closest_canonical(union_nii)
+                    else:
+                        pass  # not implemented
+                        # transform = nib.orientations.ornt_transform(union_orient, tumor_orient)
+                        # union_data = union_nii.get_fdata()
+                        # union_reoriented = nib.orientations.apply_orientation(union_data, transform)
+                        # new_affine = union_nii.affine @ nib.orientations.inv_ornt_aff(transform, union_nii.shape)
+                        # union_nii = nib.Nifti1Image(union_reoriented, new_affine, union_nii.header)
 
                 # Sanity checks
                 assert tumor_nii.shape == union_nii.shape, "Shapes do not match"
@@ -1576,6 +1589,10 @@ def choose_slice_with_most_tumor(nifti_dir, metadata_csv=None, metadata_csv_out=
     
     slice_records = []
     for caseID in sorted(os.listdir(nifti_dir)):
+        #!!!! erase
+        if caseID != "TCGA-CJ-4892":
+            continue
+
         case_dir = os.path.join(nifti_dir, caseID)
         image_file = os.path.join(case_dir, image_filename)
         mask_file = os.path.join(case_dir, mask_filename)
@@ -2335,6 +2352,8 @@ def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overla
             (1, 0, 0, 0.9)     # 2 = darker red
         ])
         mask = nib.load(overlay_mask).get_fdata()
+        if mask.ndim == 2:
+            mask = mask[..., np.newaxis]
         mask = np.rot90(mask)
         assert mask.shape == volume.shape, "Mask and image shapes do not match"
     if z is None:
@@ -2374,3 +2393,9 @@ def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overla
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             plt.savefig(out_path, bbox_inches='tight', dpi=300)
         plt.show()
+
+@register_cell_magic
+def skip_if(line, cell):
+    if eval(line):
+        return
+    get_ipython().run_cell(cell)
