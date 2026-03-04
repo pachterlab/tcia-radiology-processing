@@ -1091,7 +1091,7 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
 
         #* combine all organ segmentations
         tumor_segmentation_file = os.path.join(nifti_case_dir, tumor_mask_filename) if tumor_mask_filename else None  # segmentation_tumor.nii.gz
-        predicted_organ_segmentation_file_combined = os.path.join(nifti_case_dir, combined_organ_mask_filename)  # segmentation_kidneys.nii.gz
+        predicted_organ_segmentation_file_combined = os.path.join(nifti_case_dir, combined_organ_mask_filename)  # segmentation_organs.nii.gz
         combined_organ_tumor_segmentation_file = os.path.join(nifti_case_dir, mask_filename_out)  # segmentation.nii.gz
         niis = {}
         if not os.path.exists(predicted_organ_segmentation_file_combined) or not os.path.exists(combined_organ_tumor_segmentation_file) or overwrite:
@@ -1144,6 +1144,8 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
                     # use tumor as reference
                     if tumor_orient == ('R', 'A', 'S'):
                         union_nii = nib.as_closest_canonical(union_nii)
+                        for seg_name, seg_nii in niis.items():
+                            niis[seg_name] = nib.as_closest_canonical(seg_nii)
                     else:
                         pass  # not implemented
                         # transform = nib.orientations.ornt_transform(union_orient, tumor_orient)
@@ -1151,6 +1153,13 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
                         # union_reoriented = nib.orientations.apply_orientation(union_data, transform)
                         # new_affine = union_nii.affine @ nib.orientations.inv_ornt_aff(transform, union_nii.shape)
                         # union_nii = nib.Nifti1Image(union_reoriented, new_affine, union_nii.header)
+                        # for seg_name, seg_nii in niis.items():
+                        #     seg_orient = nib.orientations.aff2axcodes(seg_nii.affine)
+                        #     if seg_orient != tumor_orient:
+                        #         logger.debug(f"Reorienting {seg_name} segmentation from {seg_orient} to match tumor mask orientation {tumor_orient}")
+                        #         niis[seg_name] = nib.as_closest_canonical(seg_nii)
+                        #     else:
+                        #         niis[seg_name] = seg_nii
 
                 # Sanity checks
                 assert tumor_nii.shape == union_nii.shape, "Shapes do not match"
@@ -1447,7 +1456,12 @@ def standardize_volume(nifti_dir, metadata_csv=None, metadata_csv_out=None, imag
         mask_nii = nib.load(mask_path)
         mask = mask_nii.get_fdata()
 
-        tumor_mask = (mask == mask_value)
+        if isinstance(mask_value, int) or isinstance(mask_value, float):
+            tumor_mask = (mask == mask_value)
+        elif isinstance(mask_value, list):
+            tumor_mask = np.isin(mask, mask_value)
+        else:
+            raise ValueError(f"mask_value must be an int, float, or list of ints/floats. Got {type(mask_value)}")
 
         if tumor_mask.sum() == 0:
             continue
@@ -1589,10 +1603,6 @@ def choose_slice_with_most_tumor(nifti_dir, metadata_csv=None, metadata_csv_out=
     
     slice_records = []
     for caseID in sorted(os.listdir(nifti_dir)):
-        #!!!! erase
-        if caseID != "TCGA-CJ-4892":
-            continue
-
         case_dir = os.path.join(nifti_dir, caseID)
         image_file = os.path.join(case_dir, image_filename)
         mask_file = os.path.join(case_dir, mask_filename)
@@ -2393,9 +2403,3 @@ def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overla
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             plt.savefig(out_path, bbox_inches='tight', dpi=300)
         plt.show()
-
-@register_cell_magic
-def skip_if(line, cell):
-    if eval(line):
-        return
-    get_ipython().run_cell(cell)
