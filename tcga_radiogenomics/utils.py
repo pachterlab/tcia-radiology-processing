@@ -1827,10 +1827,58 @@ def choose_slice_with_most_mask_single_image(image_path, mask_path, mask_value=2
 
     return out_img_path, out_mask_path, slice_info
     
-def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, out=True):
-    # center crop/pad to specified dimensions
-    cropped_padded_image_files, cropped_padded_mask_files, final_image_files, final_mask_files = [], [], [], []
-    xxxxx
+def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, out=True, overwrite=False):
+    if out is True:
+        out = define_default_out_nifti(image_path, suffix="_sized")
+
+    if os.path.exists(out) and not overwrite:
+        logger.debug(f"Cropped/padded image already exists at {out} and overwrite=False, skipping.")
+        return out
+
+    nii = nib.load(image_path)
+    img = nii.get_fdata()
+
+    current_shape = img.shape
+    ndim = img.ndim
+
+    # determine target shape
+    dims = [xdim, ydim, zdim]
+    target_shape = tuple(
+        dims[i] if dims[i] is not None else current_shape[i]
+        for i in range(ndim)
+    )
+
+    new_img = np.zeros(target_shape, dtype=img.dtype)
+
+    src_slices = []
+    dst_slices = []
+
+    for i in range(ndim):
+        src = current_shape[i]
+        dst = target_shape[i]
+
+        if src >= dst:
+            # crop
+            start_src = (src - dst) // 2
+            end_src = start_src + dst
+            start_dst = 0
+            end_dst = dst
+        else:
+            # pad
+            start_src = 0
+            end_src = src
+            start_dst = (dst - src) // 2
+            end_dst = start_dst + src
+
+        src_slices.append(slice(start_src, end_src))
+        dst_slices.append(slice(start_dst, end_dst))
+
+    new_img[tuple(dst_slices)] = img[tuple(src_slices)]
+
+    new_nii = nib.Nifti1Image(new_img, nii.affine, nii.header)
+    nib.save(new_nii, out)
+
+    return out
 
 def process_images(nifti_dir, orient=False, resample=False, target_spacing=(0.8, 0.8, 3.0), clip_min=None, clip_max=None, normalize=False, normalization_method="volume", image_filename="0502_VENOUS.nii", mask_filename="segmentation.nii.gz", overwrite=False):
     # walk through all subdirs
@@ -2486,6 +2534,10 @@ def view_dicom(dicom_path, vmin=None, vmax=None, title="default", out_path=None)
         raise ValueError(f"Path {dicom_path} is neither a file nor a directory.")
 
 def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overlay_mask=None, out_path=None, _out_dir=None):
+    if not os.path.exists(nifti_file):
+        print(f"NIfTI file not found: {nifti_file}")
+        return
+
     nii = nib.load(nifti_file)
     volume = nii.get_fdata()
 
