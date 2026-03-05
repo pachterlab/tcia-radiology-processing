@@ -45,6 +45,14 @@ seg_mask_number_to_label = {
 }
 seg_mask_label_to_number = {v: k for k, v in seg_mask_number_to_label.items()}
 
+def define_default_out_nifti(image_file, suffix="_masked"):
+    if not isinstance(image_file, str):
+        raise ValueError(f"Expected a file path for image_file, got {type(image_file)}")
+    out = image_file.replace(".nii", f"{suffix}.nii")
+    if not out.endswith(".gz"):
+        out += ".gz"
+    return out
+
 def mask_dcm_to_nii(image_dcm_dir, seg_file, image_nifti_file = None, seg_dir_out = "."):
     # Load CT reference
     ct_files = sorted(glob.glob(os.path.join(image_dcm_dir, "*.dcm")))
@@ -98,11 +106,7 @@ def mask_dcm_to_nii(image_dcm_dir, seg_file, image_nifti_file = None, seg_dir_ou
 
 def set_canonical_orientation(image_path, out=True, overwrite=False):
     if out is True:
-        if not isinstance(image_path, str):
-            raise ValueError(f"Expected a file path for output when out=True, got {type(image_path)}")
-        out = image_path.replace(".nii", "_oriented.nii")
-        if not out.endswith(".gz"):
-            out += ".gz"
+        out = define_default_out_nifti(image_path, suffix="_oriented")
 
     if os.path.exists(out) and not overwrite:
         logger.debug(f"Resampled image already exists at {out} and overwrite=False, skipping resampling.")
@@ -129,11 +133,7 @@ def set_canonical_orientation(image_path, out=True, overwrite=False):
 
 def resample_image(image_path, target_spacing=(0.8, 0.8, 3.0), is_label=False, out=True, overwrite=False):
     if out is True:
-        if not isinstance(image_path, str):
-            raise ValueError(f"Expected a file path for output when out=True, got {type(image_path)}")
-        out = image_path.replace(".nii", "_resampled.nii")
-        if not out.endswith(".gz"):
-            out += ".gz"
+        out = define_default_out_nifti(image_path, suffix="_resampled")
 
     if os.path.exists(out) and not overwrite:
         logger.debug(f"Resampled image already exists at {out} and overwrite=False, skipping resampling.")
@@ -189,11 +189,7 @@ def resample_image(image_path, target_spacing=(0.8, 0.8, 3.0), is_label=False, o
 
 def clip_intensity_range(image_path, clip_min=-200, clip_max=300, out=True, overwrite=False):
     if out is True:
-        if not isinstance(image_path, str):
-            raise ValueError(f"Expected a file path for output when out=True, got {type(image_path)}")
-        out = image_path.replace(".nii", "_clipped.nii")
-        if not out.endswith(".gz"):
-            out += ".gz"
+        out = define_default_out_nifti(image_path, suffix="_clipped")
 
     if os.path.exists(out) and not overwrite:
         logger.debug(f"Clipped image already exists at {out} and overwrite=False, skipping clipping.")
@@ -218,10 +214,103 @@ def clip_intensity_range(image_path, clip_min=-200, clip_max=300, out=True, over
 
     return out
 
-import os
 
-import numpy as np
-import SimpleITK as sitk
+def pad_image_and_mask(
+    image_file,
+    mask_file=None,
+    target_xy=(512, 512),
+    out=True,
+    overwrite=False
+):
+    """
+    Pad image and optional mask in X/Y dimensions to target size.
+
+    Parameters
+    ----------
+    image_file : str
+        Path to NIfTI image
+    mask_file : str or None
+        Path to mask NIfTI
+    target_xy : tuple
+        Target (X,Y) size
+    out : bool
+        Write output file
+    overwrite : bool
+        Overwrite existing padded file
+
+    Returns
+    -------
+    padded_image_file, padded_mask_file
+    """
+
+    def _pad_array(arr, target_xy):
+        x, y, z = arr.shape
+        tx, ty = target_xy
+
+        if x > tx or y > ty:
+            raise ValueError(
+                f"Image larger than target size: {arr.shape} vs {target_xy}"
+            )
+
+        pad_x = tx - x
+        pad_y = ty - y
+
+        pad_x_before = pad_x // 2
+        pad_x_after = pad_x - pad_x_before
+
+        pad_y_before = pad_y // 2
+        pad_y_after = pad_y - pad_y_before
+
+        padded = np.pad(
+            arr,
+            (
+                (pad_x_before, pad_x_after),
+                (pad_y_before, pad_y_after),
+                (0, 0),
+            ),
+            mode="constant",
+            constant_values=0,
+        )
+
+        return padded
+
+    # Load image
+    img = nib.load(image_file)
+    img_data = img.get_fdata()
+
+    padded_img = _pad_array(img_data, target_xy)
+
+    if out:
+        padded_image_file = define_default_out_nifti(image_file, suffix="_padded")
+
+        if not os.path.exists(padded_image_file) or overwrite:
+            nib.save(
+                nib.Nifti1Image(padded_img, img.affine, img.header),
+                padded_image_file,
+            )
+    else:
+        padded_image_file = padded_img
+
+    padded_mask_file = None
+
+    if mask_file is not None:
+        mask = nib.load(mask_file)
+        mask_data = mask.get_fdata()
+
+        padded_mask = _pad_array(mask_data, target_xy)
+
+        if out:
+            padded_mask_file = define_default_out_nifti(mask_file, suffix="_padded")
+
+            if not os.path.exists(padded_mask_file) or overwrite:
+                nib.save(
+                    nib.Nifti1Image(padded_mask, mask.affine, mask.header),
+                    padded_mask_file,
+                )
+        else:
+            padded_mask_file = padded_mask
+
+    return padded_image_file, padded_mask_file
 
 
 def normalize_intensity(
@@ -279,11 +368,7 @@ def normalize_intensity(
             raise ValueError(f"Unsupported type {type(img_input)}")
         
         if out is True:
-            if not isinstance(image_path, str):
-                raise ValueError(f"Expected a file path for output when out=True, got {type(image_path)}")
-            out = image_path.replace(".nii", "_normalized.nii")
-            if not out.endswith(".gz"):
-                out += ".gz"
+            out = define_default_out_nifti(image_path, suffix="_normalized") if image_path else None
 
         arr = sitk.GetArrayFromImage(img).astype(np.float32)
 
@@ -1176,6 +1261,11 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
                     if organ_overlap > 0:  # keeps only the organs with any tumor overlap
                         overlapping_organs.append(seg_name)
                         combined[organ] = 1
+                if len(overlapping_organs) == 0:
+                    logger.warning(f"No overlap found between tumor and any organ for caseID {caseID}. Will keep all organs.")
+                    for seg_name, seg_nii in niis.items():
+                        organ = seg_nii.get_fdata() > 0
+                        combined[organ] = 1
 
                 combined[tumor] = 2  # tumor + organ gets labeled 2, organ alone gets labeled 1 (if there is a tumor in some part of this organ), background gets labeled 0
                 case_id_to_organ_overlap[caseID] = ",".join(overlapping_organs) if overlapping_organs else "none"
@@ -1347,7 +1437,7 @@ def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogeno
     input_df.to_csv(output_csv_path, index=False)
     logger.info(f"Saved radiogenomics imaging DataFrame for {len(input_df)} series to {output_csv_path}")
 
-def perform_pyradiomics_on_single_image_and_mask(image_file, segmentation_file, params=None, label="1,2"):
+def perform_pyradiomics_on_single_image_and_mask(image_file, segmentation_file, params=None, label=[1,2]):
     def label_is_int(label):
         try:
             _ = int(label)
@@ -1355,12 +1445,10 @@ def perform_pyradiomics_on_single_image_and_mask(image_file, segmentation_file, 
         except ValueError:
             return False
 
-    label = str(label)
-    if "," in label:
+    if isinstance(label, list):
         ma = sitk.ReadImage(segmentation_file)
         ma_arr = sitk.GetArrayFromImage(ma)
-        labels = label.split(",")
-        for l in labels:
+        for l in label:
             if not label_is_int(l):
                 raise ValueError(f"Label '{l}' is not an integer. All labels must be integers.")
             ma_arr[ma_arr == int(l)] = 1
@@ -1383,7 +1471,7 @@ def perform_pyradiomics_on_single_image_and_mask(image_file, segmentation_file, 
 
     return dict(features)
 
-def perform_radiomics_pipeline(input_csv_path, output_csv_path, threads=1, param=None, image_column="Image", mask_column="Mask", label="1,2", overwrite=False):
+def perform_radiomics_pipeline(input_csv_path, output_csv_path, threads=1, param=None, image_column="Image", mask_column="Mask", label=[1,2], overwrite=False):
     """
     Expected input_csv_path to have 2 columns: {image_column} and {mask_column}
     """
@@ -1410,7 +1498,7 @@ def perform_radiomics_pipeline(input_csv_path, output_csv_path, threads=1, param
             logger.warning(f"Mask file {mask_path} does not exist. Skipping.")
             radiomics_df = radiomics_df.drop(idx)
             continue
-        radiomic_features_individual = perform_pyradiomics_on_single_image_and_mask(image_path, mask_path, params=param, label=label)
+        radiomic_features_individual = perform_pyradiomics_on_single_image_and_mask(image_path, mask_path, params=param, label=label)  #? investigate multithreading
         radiomic_features_individual["caseID"] = row["caseID"]
         radiomic_features.append(radiomic_features_individual)
 
@@ -1439,62 +1527,141 @@ def plot_histogram(data, bins=20, vertical_line=None, vertical_line_label=None, 
     plt.close()
     logger.info(f"Saved histogram to {output_path}")
 
-def standardize_volume(nifti_dir, metadata_csv=None, metadata_csv_out=None, image_filename="0502_VENOUS.nii", mask_filename="segmentation.nii.gz", mask_value=1, overwrite=False):  # organ=1, tumor=2
-    z_extents = []
-    case_paths = []
+def load_nifti_file(nifti_file):
+    if isinstance(nifti_file, nib.Nifti1Image):
+        return nifti_file
+    elif isinstance(nifti_file, str):
+        if not os.path.exists(nifti_file):
+            raise FileNotFoundError(f"NIfTI file {nifti_file} does not exist.")
+        return nib.load(nifti_file)
+    else:
+        raise ValueError("nifti_file must be a file path or a Nifti1Image object")
 
-    label_name = seg_mask_number_to_label.get(mask_value, f"label_{mask_value}")
+def crop_to_nonzero(masked_image_nii, pad=5):
+    """
+    Crop a NIfTI image to the bounding box of nonzero voxels.
+
+    Parameters
+    ----------
+    masked_image_nii : nib.Nifti1Image
+
+    Returns
+    -------
+    cropped_nii : nib.Nifti1Image
+    bbox : tuple
+        (xmin, xmax, ymin, ymax, zmin, zmax)
+    """
+
+    data = masked_image_nii.get_fdata()
+    affine = masked_image_nii.affine
+
+    # find non-zero voxels
+    nonzero = np.argwhere(data != 0)
+
+    if nonzero.size == 0:
+        raise ValueError("Image contains only zeros.")
+
+    xmin, ymin, zmin = nonzero.min(axis=0)
+    xmax, ymax, zmax = nonzero.max(axis=0) + 1
+
+    if pad:
+        xmin = max(xmin - pad, 0)
+        ymin = max(ymin - pad, 0)
+        zmin = max(zmin - pad, 0)
+        xmax = min(xmax + pad, data.shape[0])
+        ymax = min(ymax + pad, data.shape[1])
+        zmax = min(zmax + pad, data.shape[2])
+
+    # crop image
+    cropped = data[xmin:xmax, ymin:ymax, zmin:zmax]
+
+    # update affine (shift origin)
+    new_affine = affine.copy()
+    new_affine[:3, 3] = affine[:3, :3] @ np.array([xmin, ymin, zmin]) + affine[:3, 3]
+
+    cropped_nii = nib.Nifti1Image(cropped, new_affine, masked_image_nii.header)
+
+    return cropped_nii
+
+def apply_mask(image_file, mask_file, label=None, crop=True, pad_after_crop=5, out=True):
+    image_nii = load_nifti_file(image_file)
+    mask_nii = load_nifti_file(mask_file)
+
+    image_data = image_nii.get_fdata()
+    mask_data = mask_nii.get_fdata()
+
+    if image_data.shape != mask_data.shape:
+        raise ValueError(f"Image and mask shapes do not match: {image_data.shape} vs {mask_data.shape}")
+
+    if label is None:
+        masked_image_data = image_data * (mask_data > 0)
+    else:
+        if isinstance(label, int) or isinstance(label, float):
+            masked_image_data = image_data * (mask_data == label)
+        elif isinstance(label, list):
+            masked_image_data = image_data * np.isin(mask_data, label)
+        else:
+            raise ValueError(f"label must be an int, float, or list of ints/floats. Got {type(label)}")
+
+    masked_image_nii = nib.Nifti1Image(masked_image_data, affine=image_nii.affine, header=image_nii.header)
+
+    if crop:
+        masked_image_nii = crop_to_nonzero(masked_image_nii, pad=pad_after_crop)
+
+    if out is True:
+        out = define_default_out_nifti(image_file, suffix="_masked")
+    
+    if out:
+        nib.save(masked_image_nii, out)
+        logger.info(f"Saved masked image to {out}")
+
+    return out
+
+def compute_shape_histogram(nifti_dir, image_filename):
+    x_extents, y_extents, z_extents = [], [], []
 
     # -------- First Pass: compute tumor z-extent for all cases --------
     for caseID in sorted(os.listdir(nifti_dir)):
         case_dir = os.path.join(nifti_dir, caseID)
-        mask_path = os.path.join(case_dir, mask_filename)
+        image_path = os.path.join(case_dir, image_filename)
 
-        if not os.path.exists(mask_path):
+        if not os.path.exists(image_path):
             continue
 
-        mask_nii = nib.load(mask_path)
-        mask = mask_nii.get_fdata()
-
-        if isinstance(mask_value, int) or isinstance(mask_value, float):
-            tumor_mask = (mask == mask_value)
-        elif isinstance(mask_value, list):
-            tumor_mask = np.isin(mask, mask_value)
-        else:
-            raise ValueError(f"mask_value must be an int, float, or list of ints/floats. Got {type(mask_value)}")
-
-        if tumor_mask.sum() == 0:
-            continue
-
-        z_indices = np.where(tumor_mask.any(axis=(0, 1)))[0]
-
-        if len(z_indices) == 0:
-            continue
-
-        z_extent = z_indices.max() - z_indices.min() + 1
-        z_extents.append(z_extent)
-        case_paths.append(case_dir)
-
-    if len(z_extents) == 0:
-        logger.warning("No valid tumor masks found.")
-        return None, None
-
-    z_extents = np.array(z_extents)
-
-    # -------- Determine standardized z range (95th percentile) --------
-    fixed_z = int(np.percentile(z_extents, 95))
-    logger.info(f"Using fixed z range (95th percentile): {fixed_z}")
-
+        image_nii = nib.load(image_path)
+        x_extents.append(image_nii.shape[0])
+        y_extents.append(image_nii.shape[1])
+        if len(image_nii.shape) > 2:
+            z_extents.append(image_nii.shape[2])
+    
     visualization_dir = os.path.join(os.path.dirname(nifti_dir), "visualization")
     os.makedirs(visualization_dir, exist_ok=True)
 
-    plot_histogram(z_extents, bins=20, vertical_line=fixed_z, vertical_line_label="95th percentile", xlabel=f"{label_name} Z-Extent (slices)", title=f"{label_name} z-extent Distribution", output_path=os.path.join(visualization_dir, f"{label_name.lower()}_z_extent_histogram.png"))
+    extents_95th = {}
+    for axis, extents in zip(["x", "y", "z"], [x_extents, y_extents, z_extents]):
+        if len(extents) == 0:
+            logger.warning(f"No extents found for axis {axis}. Skipping histogram and 95th percentile calculation.")
+            extents_95th[axis] = None
+            continue
+
+        extents = np.array(extents)
+        extent_max = extents.max()
+        extent_95th = int(np.percentile(extents, 95))
+
+        logger.info(f"{axis}-extent: max={extent_max}, 95th percentile={extent_95th}")
+        plot_histogram(extents, bins=20, xlabel=f"{axis}-Extent (voxels)", vertical_line_label=f"95th percentile ({extent_95th})", title=f"{axis}-extent Distribution", output_path=os.path.join(os.path.dirname(nifti_dir), "visualization", f"{axis.lower()}_extent_histogram.png"))
+        extents_95th[axis] = extent_95th
+    
+    return extents_95th
+
+def standardize_volume(nifti_dir, metadata_csv=None, metadata_csv_out=None, image_filename="0502_VENOUS.nii", mask_filename="segmentation.nii.gz", mask_value=1, overwrite=False):  # organ=1, tumor=2
+    compute_shape_histogram(nifti_dir, mask_filename, mask_value=mask_value)
 
     # -------- Second Pass: crop and pad --------
     half_z = fixed_z // 2
 
-    image_filename_new = "image_standardized.nii.gz"
-    mask_filename_new = "segmentation_standardized.nii.gz"
+    image_filename_new = image_filename.replace(".nii", "_standardized.nii")
+    mask_filename_new = mask_filename.replace(".nii", "_standardized.nii")
 
     for caseID in sorted(os.listdir(nifti_dir)):
         case_dir = os.path.join(nifti_dir, caseID)
@@ -1597,100 +1764,73 @@ def standardize_volume(nifti_dir, metadata_csv=None, metadata_csv_out=None, imag
 
     return image_filename_new, mask_filename_new
 
-def choose_slice_with_most_tumor(nifti_dir, metadata_csv=None, metadata_csv_out=None, image_filename="0502_VENOUS.nii", mask_filename="segmentation.nii.gz", tumor_mask_value=2, overwrite=False):
-    image_filename_new = "image_best_slice.nii.gz"
-    mask_filename_new = "segmentation_best_slice.nii.gz"
+def choose_slice_with_most_mask_single_image(image_path, mask_path, mask_value=2, out_image=True, out_mask=True, overwrite=False):
+    if out_image is True:
+        out_img_path = define_default_out_nifti(image_path, suffix="_best_slice")
+    if out_mask is True:
+        out_mask_path = define_default_out_nifti(mask_path, suffix="_best_slice")
+
+    if os.path.exists(out_img_path) and os.path.exists(out_mask_path) and not overwrite:
+        logger.debug(f"Clipped image already exists at {out_img_path} and overwrite=False, skipping clipping.")
+        return out_img_path, out_mask_path, {}
+
+    # Load the image and mask
+    img_nii = nib.load(image_path)
+    mask_nii = nib.load(mask_path)
+
+    img = img_nii.get_fdata()
+    mask = mask_nii.get_fdata()
+
+    # Identify mask voxels (value == mask_value)
+    if isinstance(mask_value, list):
+        selected_mask = np.isin(mask, mask_value)
+    else:
+        selected_mask = (mask == mask_value)
+
+    # Compute mask area per slice
+    mask_area_per_slice = selected_mask.sum(axis=(0, 1))
+
+    # Return None if no mask
+    if mask_area_per_slice.max() == 0:
+        return None, 0
+
+    # Get slice index with largest mask area
+    best_slice_idx = int(np.argmax(mask_area_per_slice))
+    tumor_pixels_in_best_slice = int(mask_area_per_slice[best_slice_idx])
+
+    mask_value_str = ",".join(mask_value) if isinstance(mask_value, list) else str(mask_value)
+    slice_info = {
+        f"slice_with_most_mask_{mask_value_str}": best_slice_idx,
+        f"number_of_{mask_value_str}_mask_pixels_in_best_slice": tumor_pixels_in_best_slice,
+    }
     
-    slice_records = []
-    for caseID in sorted(os.listdir(nifti_dir)):
-        case_dir = os.path.join(nifti_dir, caseID)
-        image_file = os.path.join(case_dir, image_filename)
-        mask_file = os.path.join(case_dir, mask_filename)
-
-        if not os.path.exists(image_file) or not os.path.exists(mask_file):
-            continue
-
-        out_img_path = os.path.join(case_dir, image_filename_new)
-        out_mask_path = os.path.join(case_dir, mask_filename_new)
-
-        # if os.path.exists(out_img_path) and os.path.exists(out_mask_path) and not overwrite:
-        #     continue
-
-        # Load
-        img_nii = nib.load(image_file)
-        mask_nii = nib.load(mask_file)
-
-        img = img_nii.get_fdata()
-        mask = mask_nii.get_fdata()
-
-        # Identify tumor voxels (value == tumor_mask_value)
-        tumor_mask = (mask == tumor_mask_value)
-
-        # Compute tumor area per slice
-        tumor_area_per_slice = tumor_mask.sum(axis=(0, 1))
-
-        # Skip if no tumor
-        if tumor_area_per_slice.max() == 0:
-            logger.warning(f"No tumor found in {caseID}")
-            continue
-
-        # Get slice index with largest tumor area
-        best_slice_idx = np.argmax(tumor_area_per_slice)
-
-        slice_records.append({
-            "caseID": caseID,
-            "slice_with_most_tumor": best_slice_idx,
-            "number_of_tumor_pixels_in_best_slice": int(tumor_area_per_slice.max()),
-        })
-
-        if os.path.exists(out_img_path) and os.path.exists(out_mask_path) and not overwrite:
-            continue
-
-        # Extract slice
-        img_slice = img[:, :, best_slice_idx]
-        mask_slice = mask[:, :, best_slice_idx]
-
-        # # Expand dims to keep 3D shape (X, Y, 1)
-        # img_slice = img_slice[:, :, np.newaxis]
-        # mask_slice = mask_slice[:, :, np.newaxis]
-
-        # Update affine (keep same, but technically 2D slice)
-        new_affine = img_nii.affine.copy()
-
-        # Save
-        out_img = nib.Nifti1Image(img_slice, new_affine)
-        out_mask = nib.Nifti1Image(mask_slice, new_affine)
-
-        nib.save(out_img, out_img_path)
-        nib.save(out_mask, out_mask_path)
-
-        logger.debug(f"Saved best slice for {caseID}")
+    if best_slice_idx is None:
+        logger.warning(f"No mask voxels found in {mask_path}.")
     
-    if metadata_csv is not None:
-        if isinstance(metadata_csv, str) and os.path.exists(metadata_csv):
-            metadata_df = pd.read_csv(metadata_csv)
-        elif isinstance(metadata_csv, pd.DataFrame):
-            metadata_df = metadata_csv
-        else:
-            raise ValueError(f"Expected a file path or DataFrame for metadata_csv, got {type(metadata_csv)}")
-        slice_info_df = pd.DataFrame(slice_records)
-        if len(slice_info_df) == 0:
-            raise ValueError("No valid cases with tumor found to extract slice information for metadata CSV update.")
+    # Extract slice
+    img_slice = img[:, :, best_slice_idx]
+    mask_slice = mask[:, :, best_slice_idx]
 
-        for col in slice_info_df.columns:
-            if col == "caseID":
-                continue
-            if col in metadata_df.columns:
-                logger.warning(f"'{col}' column already exists in metadata_csv. It will be overwritten with new values based on slice selection results.")
-                metadata_df.drop(columns=[col], inplace=True)
-        
-        metadata_df = metadata_df.merge(slice_info_df, on="caseID", how="left")
+    # # Expand dims to keep 3D shape (X, Y, 1)
+    # img_slice = img_slice[:, :, np.newaxis]
+    # mask_slice = mask_slice[:, :, np.newaxis]
 
-        if metadata_csv_out is None and isinstance(metadata_csv, str):
-            metadata_csv_out = metadata_csv  # overwrite original
-        metadata_df.to_csv(metadata_csv_out, index=False)
+    # Update affine (keep same, but technically 2D slice)
+    new_affine = img_nii.affine.copy()
 
-    return image_filename_new, mask_filename_new
+    # Save
+    out_img = nib.Nifti1Image(img_slice, new_affine)
+    out_mask = nib.Nifti1Image(mask_slice, new_affine)
+
+    nib.save(out_img, out_img_path)
+    nib.save(out_mask, out_mask_path)
+
+    return out_img_path, out_mask_path, slice_info
+    
+def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, out=True):
+    # center crop/pad to specified dimensions
+    cropped_padded_image_files, cropped_padded_mask_files, final_image_files, final_mask_files = [], [], [], []
+    xxxxx
 
 def process_images(nifti_dir, orient=False, resample=False, target_spacing=(0.8, 0.8, 3.0), clip_min=None, clip_max=None, normalize=False, normalization_method="volume", image_filename="0502_VENOUS.nii", mask_filename="segmentation.nii.gz", overwrite=False):
     # walk through all subdirs
