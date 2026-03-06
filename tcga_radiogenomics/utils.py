@@ -1540,50 +1540,87 @@ def load_nifti_file(nifti_file):
 def crop_to_nonzero(masked_image_nii, pad=5):
     """
     Crop a NIfTI image to the bounding box of nonzero voxels.
+    Works for both 2D and 3D images.
 
     Parameters
     ----------
     masked_image_nii : nib.Nifti1Image
+    pad : int
 
     Returns
     -------
     cropped_nii : nib.Nifti1Image
     bbox : tuple
-        (xmin, xmax, ymin, ymax, zmin, zmax)
+        bounding box as (min0, max0, min1, max1, ...)
     """
 
     data = masked_image_nii.get_fdata()
     affine = masked_image_nii.affine
 
-    # find non-zero voxels
     nonzero = np.argwhere(data != 0)
 
     if nonzero.size == 0:
         raise ValueError("Image contains only zeros.")
 
-    xmin, ymin, zmin = nonzero.min(axis=0)
-    xmax, ymax, zmax = nonzero.max(axis=0) + 1
+    mins = nonzero.min(axis=0)
+    maxs = nonzero.max(axis=0) + 1
+
+    shape = np.array(data.shape)
 
     if pad:
-        xmin = max(xmin - pad, 0)
-        ymin = max(ymin - pad, 0)
-        zmin = max(zmin - pad, 0)
-        xmax = min(xmax + pad, data.shape[0])
-        ymax = min(ymax + pad, data.shape[1])
-        zmax = min(zmax + pad, data.shape[2])
+        mins = np.maximum(mins - pad, 0)
+        maxs = np.minimum(maxs + pad, shape)
 
-    # crop image
-    cropped = data[xmin:xmax, ymin:ymax, zmin:zmax]
+    # build slice object dynamically
+    slices = tuple(slice(mn, mx) for mn, mx in zip(mins, maxs))
+    cropped = data[slices]
 
-    # update affine (shift origin)
+    # update affine shift
     new_affine = affine.copy()
-    new_affine[:3, 3] = affine[:3, :3] @ np.array([xmin, ymin, zmin]) + affine[:3, 3]
+    shift = affine[:3, :3] @ mins[:3] if data.ndim >= 3 else affine[:2, :2] @ mins[:2]
+    new_affine[:len(shift), 3] = affine[:len(shift), :len(shift)] @ mins[:len(shift)] + affine[:len(shift), 3]
 
     cropped_nii = nib.Nifti1Image(cropped, new_affine, masked_image_nii.header)
 
-    return cropped_nii
+    bbox = tuple(v for pair in zip(mins, maxs) for v in pair)
 
-def apply_mask(image_file, mask_file, label=None, crop=True, pad_after_crop=5, out=True):
+    return cropped_nii, bbox
+
+def crop_with_bbox(nii, bbox):
+    """
+    Crop a NIfTI image using a bounding box.
+    Works for 2D or 3D images.
+
+    Parameters
+    ----------
+    nii : nib.Nifti1Image
+    bbox : tuple
+        (min0, max0, min1, max1, ...)
+
+    Returns
+    -------
+    nib.Nifti1Image
+    """
+
+    data = nii.get_fdata()
+    affine = nii.affine
+
+    # convert bbox -> mins/maxs
+    mins = np.array(bbox[0::2])
+    maxs = np.array(bbox[1::2])
+
+    # build slice tuple dynamically
+    slices = tuple(slice(mn, mx) for mn, mx in zip(mins, maxs))
+    cropped = data[slices]
+
+    # update affine origin shift
+    new_affine = affine.copy()
+    shift = affine[:len(mins), :len(mins)] @ mins + affine[:len(mins), 3]
+    new_affine[:len(mins), 3] = shift
+
+    return nib.Nifti1Image(cropped, new_affine, nii.header)
+
+def apply_mask(image_file, mask_file, label=None, crop=True, pad_after_crop=5, out_image=True, out_mask=True):
     image_nii = load_nifti_file(image_file)
     mask_nii = load_nifti_file(mask_file)
 
@@ -1606,16 +1643,23 @@ def apply_mask(image_file, mask_file, label=None, crop=True, pad_after_crop=5, o
     masked_image_nii = nib.Nifti1Image(masked_image_data, affine=image_nii.affine, header=image_nii.header)
 
     if crop:
-        masked_image_nii = crop_to_nonzero(masked_image_nii, pad=pad_after_crop)
+        masked_image_nii, bbox = crop_to_nonzero(masked_image_nii, pad=pad_after_crop)
+        mask_nii = crop_with_bbox(mask_nii, bbox)
 
-    if out is True:
-        out = define_default_out_nifti(image_file, suffix="_masked")
+    if out_image is True:
+        out_image = define_default_out_nifti(image_file, suffix="_masked")
+    if out_mask is True:
+        out_mask = define_default_out_nifti(mask_file, suffix="_masked")
     
-    if out:
-        nib.save(masked_image_nii, out)
-        logger.info(f"Saved masked image to {out}")
+    if out_image:
+        nib.save(masked_image_nii, out_image)
+        logger.info(f"Saved masked image to {out_image}")
 
-    return out
+    if out_mask:
+        nib.save(mask_nii, out_mask)
+        logger.info(f"Saved masked mask to {out_mask}")
+
+    return out_image, out_mask
 
 def compute_shape_histogram(nifti_dir, image_filename):
     x_extents, y_extents, z_extents = [], [], []
@@ -2526,6 +2570,7 @@ def view_dicom_directory(dicom_dir, vmin=None, vmax=None):
         interact(show_slice, i=(0, volume.shape[0]-1));
 
 def view_dicom(dicom_path, vmin=None, vmax=None, title="default", out_path=None):
+    logger.info(f"Viewing DICOM path: {dicom_path}")
     if os.path.isfile(dicom_path):
         view_dicom_file(dicom_path, title=title, vmin=vmin, vmax=vmax, out_path=out_path)
     elif os.path.isdir(dicom_path):
@@ -2538,12 +2583,15 @@ def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overla
         print(f"NIfTI file not found: {nifti_file}")
         return
 
+    logger.info(f"Viewing NIfTI file: {nifti_file}")
+    
     nii = nib.load(nifti_file)
     volume = nii.get_fdata()
 
     # If 2D, make it behave like a single-slice 3D volume
     if volume.ndim == 2:
         volume = volume[..., np.newaxis]
+        z = 0
     nz = volume.shape[2]
 
     volume = np.rot90(volume)
