@@ -9,6 +9,10 @@ import sys
 import gzip
 import tempfile
 import zipfile
+import time
+import threading
+import psutil
+from functools import wraps
 
 import highdicom as hd
 import matplotlib.pyplot as plt
@@ -48,6 +52,108 @@ seg_mask_number_to_label = {
     3: "Cyst",
 }
 seg_mask_label_to_number = {v: k for k, v in seg_mask_number_to_label.items()}
+
+def _dir_size_bytes(path):
+    try:
+        return int(subprocess.check_output(["du", "-sb", path]).split()[0])
+    except Exception:
+        return None
+
+
+def measure_time_memory_storage(
+    enabled=True,
+    disk_path=None,
+    interval=0.1,
+):
+
+    def decorator(func):
+
+        if not enabled:
+            func.last_metrics = None
+            return func
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+
+            # ---- resolve disk path dynamically ----
+
+            resolved_disk_path = disk_path
+
+            if callable(disk_path):
+                resolved_disk_path = disk_path()
+
+            # ---- monitoring setup ----
+
+            process = psutil.Process()
+            peak_mem = 0
+            running = True
+
+            def monitor():
+                nonlocal peak_mem
+                while running:
+                    try:
+                        mem = process.memory_info().rss
+                        for child in process.children(recursive=True):
+                            try:
+                                mem += child.memory_info().rss
+                            except psutil.NoSuchProcess:
+                                pass
+                        peak_mem = max(peak_mem, mem)
+                    except psutil.NoSuchProcess:
+                        pass
+
+                    time.sleep(interval)
+
+            start_disk = _dir_size_bytes(resolved_disk_path) if resolved_disk_path else None
+            start_time = time.time()
+
+            monitor_thread = threading.Thread(target=monitor, daemon=True)
+            monitor_thread.start()
+
+            try:
+                result = func(*args, **kwargs)
+            finally:
+                running = False
+                monitor_thread.join()
+
+            end_time = time.time()
+            end_disk = _dir_size_bytes(resolved_disk_path) if resolved_disk_path else None
+
+            elapsed = end_time - start_time
+            peak_mem_gb = peak_mem / 1e9
+
+            disk_change = None
+            if resolved_disk_path and start_disk is not None and end_disk is not None:
+                disk_change = (end_disk - start_disk) / 1e9
+
+            metrics = {
+                "time": elapsed,
+                "peak_mem_gb": peak_mem_gb,
+                "disk_written_gb": disk_change,
+            }
+            wrapper.last_metrics = metrics
+            
+            # logger.info("----- Resource usage -----")
+            # logger.info(f"Wall time: {elapsed:.2f} sec")
+            # logger.info(f"Peak memory (process tree): {peak_mem_gb:.2f} GB")
+            # if disk_change is not None:
+            #     logger.info(f"Disk written: {disk_change:.2f} GB")
+            # logger.info("--------------------------")
+
+            return result
+
+        return wrapper
+
+    return decorator
+
+def add_metrics(metrics, total=None):
+    if total is None:
+        total = {"time": 0, "peak_mem": 0, "disk": 0}
+    total["time"] += metrics["time"]
+    total["peak_mem"] += metrics["peak_mem_gb"]
+    if metrics["disk_written_gb"] is not None:
+        total["disk"] += metrics["disk_written_gb"]
+    return total
 
 def define_default_out_nifti(image_file, suffix="_masked"):
     if not isinstance(image_file, str):
@@ -113,7 +219,7 @@ def set_canonical_orientation(image_path, out=True, overwrite=False):
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_oriented")
 
-    if os.path.exists(out) and not overwrite:
+    if out is not None and os.path.exists(out) and not overwrite:
         logger.debug(f"Resampled image already exists at {out} and overwrite=False, skipping resampling.")
         return out
 
@@ -131,9 +237,10 @@ def set_canonical_orientation(image_path, out=True, overwrite=False):
     else:
         logger.debug(f"Image already in canonical orientation ('R', 'A', 'S'), no reorientation needed.")
     
-    if out:
-        nib.save(img_nib, out)
-
+    if out is None:
+        return img_nib
+    
+    nib.save(img_nib, out)
     return out
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
@@ -141,7 +248,7 @@ def resample_image(image_path, target_spacing=(0.8, 0.8, 3.0), is_label=False, o
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_resampled")
 
-    if os.path.exists(out) and not overwrite:
+    if out is not None and os.path.exists(out) and not overwrite:
         logger.debug(f"Resampled image already exists at {out} and overwrite=False, skipping resampling.")
         return out
 
@@ -163,7 +270,7 @@ def resample_image(image_path, target_spacing=(0.8, 0.8, 3.0), is_label=False, o
     
     if original_spacing == target_spacing:  # No resampling needed
         logger.debug(f"Original spacing {original_spacing} matches target spacing {target_spacing}, skipping resampling.")
-        if out:
+        if out is not None:
             sitk.WriteImage(img_sitk, out)
         return out
 
@@ -188,8 +295,11 @@ def resample_image(image_path, target_spacing=(0.8, 0.8, 3.0), is_label=False, o
         resampler.SetInterpolator(sitk.sitkLinear)
 
     img_sitk_resampled = resampler.Execute(img_sitk)
-    if out:
-        sitk.WriteImage(img_sitk_resampled, out)
+    
+    if out is None:
+        return img_sitk_resampled
+
+    sitk.WriteImage(img_sitk_resampled, out)
     
     return out
 
@@ -198,7 +308,7 @@ def clip_intensity_range(image_path, clip_min=-200, clip_max=300, out=True, over
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_clipped")
 
-    if os.path.exists(out) and not overwrite:
+    if out is not None and os.path.exists(out) and not overwrite:
         logger.debug(f"Clipped image already exists at {out} and overwrite=False, skipping clipping.")
         return out
 
@@ -216,8 +326,10 @@ def clip_intensity_range(image_path, clip_min=-200, clip_max=300, out=True, over
         upperBound=clip_max
     )
 
-    if out:
-        sitk.WriteImage(img_sitk_clipped, out)
+    if out is None:
+        return img_sitk_clipped
+
+    sitk.WriteImage(img_sitk_clipped, out)
 
     return out
 
@@ -1670,6 +1782,9 @@ def apply_mask(image_file, mask_file, label=None, crop=True, pad_after_crop=5, o
     if out_mask:
         nib.save(mask_nii, out_mask)
         logger.info(f"Saved masked mask to {out_mask}")
+    
+    if out_image is None and out_mask is None:
+        return masked_image_nii, mask_nii
 
     return out_image, out_mask
 
@@ -1718,7 +1833,7 @@ def choose_slice_with_most_mask_single_image(image_path, mask_path, mask_value=2
     if out_mask is True:
         out_mask_path = define_default_out_nifti(mask_path, suffix="_best_slice")
 
-    if os.path.exists(out_img_path) and os.path.exists(out_mask_path) and not overwrite:
+    if out_img_path is not None and os.path.exists(out_img_path) and out_mask_path is not None and os.path.exists(out_mask_path) and not overwrite:
         logger.debug(f"Clipped image already exists at {out_img_path} and overwrite=False, skipping clipping.")
         return out_img_path, out_mask_path, {}
 
@@ -1773,6 +1888,9 @@ def choose_slice_with_most_mask_single_image(image_path, mask_path, mask_value=2
     nib.save(out_img, out_img_path)
     nib.save(out_mask, out_mask_path)
 
+    if out_image is None and out_mask is None:
+        return out_img, out_mask, slice_info
+
     return out_img_path, out_mask_path, slice_info
     
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
@@ -1780,7 +1898,7 @@ def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, out=True, overwrit
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_sized")
 
-    if os.path.exists(out) and not overwrite:
+    if out is not None and os.path.exists(out) and not overwrite:
         logger.debug(f"Cropped/padded image already exists at {out} and overwrite=False, skipping.")
         return out
 
@@ -1825,8 +1943,10 @@ def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, out=True, overwrit
     new_img[tuple(dst_slices)] = img[tuple(src_slices)]
 
     new_nii = nib.Nifti1Image(new_img, nii.affine, nii.header)
-    nib.save(new_nii, out)
+    if out is None:
+        return new_nii
 
+    nib.save(new_nii, out)
     return out
 
 def process_images(nifti_dir, orient=False, resample=False, target_spacing=(0.8, 0.8, 3.0), clip_min=None, clip_max=None, normalize=False, normalization_method="volume", image_filename="0502_VENOUS.nii", mask_filename="segmentation.nii.gz", overwrite=False):
@@ -2549,7 +2669,7 @@ def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overla
             plt.savefig(out_path, bbox_inches='tight', dpi=300)
         plt.show()
 
-@measure_time_memory_storage(enabled=True, disk_path=lambda: os.path.dirname(nifti_file))
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def nii_to_npy(nifti_file, out=True):
     if not isinstance(nifti_file, str):
         raise ValueError(f"Expected a file path for nifti_file, got {type(nifti_file)}")
@@ -2566,114 +2686,10 @@ def nii_to_npy(nifti_file, out=True):
             out = nifti_file[:-4] + ".npy"
         else:
             out = nifti_file + ".npy"
-    if out:
-        np.save(out, volume)
-        logger.info(f"Saved NumPy volume to {out}")
     
+    if out is None:
+        return volume
+
+    np.save(out, volume)
+    logger.info(f"Saved NumPy volume to {out}")
     return out
-
-import time
-import subprocess
-import threading
-import psutil
-from functools import wraps
-
-
-def _dir_size_bytes(path):
-    try:
-        return int(subprocess.check_output(["du", "-sb", path]).split()[0])
-    except Exception:
-        return None
-
-
-def measure_time_memory_storage(
-    enabled=True,
-    disk_path=None,
-    interval=0.1,
-):
-
-    def decorator(func):
-
-        if not enabled:
-            return func
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-
-            # ---- resolve disk path dynamically ----
-
-            resolved_disk_path = disk_path
-
-            if callable(disk_path):
-                resolved_disk_path = disk_path()
-
-            # ---- monitoring setup ----
-
-            process = psutil.Process()
-            peak_mem = 0
-            running = True
-
-            def monitor():
-                nonlocal peak_mem
-                while running:
-                    try:
-                        mem = process.memory_info().rss
-                        for child in process.children(recursive=True):
-                            try:
-                                mem += child.memory_info().rss
-                            except psutil.NoSuchProcess:
-                                pass
-                        peak_mem = max(peak_mem, mem)
-                    except psutil.NoSuchProcess:
-                        pass
-
-                    time.sleep(interval)
-
-            start_disk = _dir_size_bytes(resolved_disk_path) if resolved_disk_path else None
-            start_time = time.time()
-
-            monitor_thread = threading.Thread(target=monitor, daemon=True)
-            monitor_thread.start()
-
-            try:
-                result = func(*args, **kwargs)
-            finally:
-                running = False
-                monitor_thread.join()
-
-            end_time = time.time()
-            end_disk = _dir_size_bytes(resolved_disk_path) if resolved_disk_path else None
-
-            elapsed = end_time - start_time
-            peak_mem_gb = peak_mem / 1e9
-
-            disk_change = None
-            if resolved_disk_path and start_disk is not None and end_disk is not None:
-                disk_change = (end_disk - start_disk) / 1e9
-
-            metrics = {
-                "time": elapsed,
-                "peak_mem_gb": peak_mem_gb,
-                "disk_written_gb": disk_change,
-            }
-            wrapper.last_metrics = metrics
-            
-            # logger.info("----- Resource usage -----")
-            # logger.info(f"Wall time: {elapsed:.2f} sec")
-            # logger.info(f"Peak memory (process tree): {peak_mem_gb:.2f} GB")
-            # if disk_change is not None:
-            #     logger.info(f"Disk written: {disk_change:.2f} GB")
-            # logger.info("--------------------------")
-
-            return result
-
-        return wrapper
-
-    return decorator
-
-def add_metrics(metrics, total=None):
-    if total is None:
-        total = {"time": 0, "peak_mem": 0, "disk": 0}
-    total["time"] += metrics["time"]
-    total["peak_mem"] += metrics["peak_mem_gb"]
-    total["disk"] += metrics["disk_written_gb"]
