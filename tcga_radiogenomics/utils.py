@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import gzip
 import tempfile
 import zipfile
 
@@ -24,6 +25,9 @@ from tqdm import tqdm
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+PROFILE_PIPELINE = True
+PROFILE_PIPELINE_DATA_DIR = None
 
 tcia_kirc_manifest_url = "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA_TCGA-KIRC_09-16-2015.tcia"
 tcga_kirc_metadata_url = "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA_TCGA-KIRC_09-16-2015-nbia-digest.xlsx"
@@ -104,6 +108,7 @@ def mask_dcm_to_nii(image_dcm_dir, seg_file, image_nifti_file = None, seg_dir_ou
         nib.save(nii, os.path.join(seg_dir_out, f"seg_{mask_name}.nii.gz"))
         logger.info(f"Saved segmentation mask for '{mask_name}' to {os.path.join(seg_dir_out, f'seg_{mask_name}.nii.gz')}")
 
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def set_canonical_orientation(image_path, out=True, overwrite=False):
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_oriented")
@@ -131,6 +136,7 @@ def set_canonical_orientation(image_path, out=True, overwrite=False):
 
     return out
 
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def resample_image(image_path, target_spacing=(0.8, 0.8, 3.0), is_label=False, out=True, overwrite=False):
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_resampled")
@@ -187,6 +193,7 @@ def resample_image(image_path, target_spacing=(0.8, 0.8, 3.0), is_label=False, o
     
     return out
 
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def clip_intensity_range(image_path, clip_min=-200, clip_max=300, out=True, overwrite=False):
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_clipped")
@@ -588,6 +595,7 @@ def pad_mask_to_image(mask_path, image_path, out_path):
 
     sitk.WriteImage(resampled_mask, out_path)
 
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_dir, segmentation_dcm_dir=None, segmentation_metadata_df=None, segimage2itkimage_conda=False, min_files=5, max_thickness_mm=10):
     series_to_folder = make_series_to_folder_mapping(imaging_dcm_dir)
     
@@ -991,7 +999,8 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
 
                 # caseID = first folder after src_dir
                 rel_path = os.path.relpath(src_path, src_dir)
-                case_id = rel_path.split(os.sep)[0]
+                patient_id = rel_path.split(os.sep)[0]
+                case_id = patient_id
                 dcm_zip_path = os.path.join(os.path.dirname(root), "DICOM.zip")
                 dcm = get_seriesid_from_dicom_zip(dcm_zip_path)
                 series_id = dcm.SeriesInstanceUID
@@ -1014,7 +1023,8 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
 
                 if len(row_dict) == 0:  # only add metadata once per case
                     row_dict["caseID"] = case_id
-                    row_dict["Subject ID"] = case_id  # duplicate caseID as Subject ID for consistency with other metadata
+                    row_dict["Project"] = "tcga-kirc"
+                    row_dict["Subject ID"] = patient_id
                     row_dict["Study UID"] = study_id
                     row_dict["Series UID"] = series_id
                     row_dict["Series Description"] = series_description
@@ -1117,6 +1127,7 @@ def fill_hole_and_morphological_close(left_nii, fill_holes=True, morphological_c
     left_nii = nib.Nifti1Image(left_mask, affine=left_nii.affine, header=left_nii.header)
     return left_nii
 
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, metadata_csv_out=None, remove_small_blobs=True, fill_holes=True, morphological_closing=True, image_filename="0502_VENOUS.nii", tumor_mask_filename="segmentation_tumor.nii.gz", combined_organ_mask_filename="segmentation_organs_combined.nii.gz", mask_filename_out="segmentation.nii.gz", overwrite=False, visualize=True, orient=True):
     if metadata_csv is not None:
         if isinstance(metadata_csv, str) and os.path.exists(metadata_csv):
@@ -1362,6 +1373,7 @@ def get_number_of_voxels_and_number_of_slices(mask_path):
     num_slices = mask_data.shape[2]  # assuming slices are along the third dimension
     return num_voxels, num_slices
 
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogenomics_imaging_data.csv", imaging_file_name="imaging.nii.gz", mask_file_name="segmentation.nii.gz", metadata_df=None, metadata_df_columns_to_merge=None, series_description_keywords_exclude="default", overwrite=False):
     """
     Expected structure of raw_image_data_dir:
@@ -1400,8 +1412,6 @@ def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogeno
             "caseID": case_dir,
             "Image": image_path,
             "Mask": mask_path,
-            # "NumVoxels": num_voxels,
-            # "NumSlices": num_slices,
         })
     
     if len(input_data) == 0:
@@ -1471,6 +1481,7 @@ def perform_pyradiomics_on_single_image_and_mask(image_file, segmentation_file, 
 
     return dict(features)
 
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def perform_radiomics_pipeline(input_csv_path, output_csv_path, threads=1, param=None, image_column="Image", mask_column="Mask", label=[1,2], overwrite=False):
     """
     Expected input_csv_path to have 2 columns: {image_column} and {mask_column}
@@ -1620,6 +1631,7 @@ def crop_with_bbox(nii, bbox):
 
     return nib.Nifti1Image(cropped, new_affine, nii.header)
 
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def apply_mask(image_file, mask_file, label=None, crop=True, pad_after_crop=5, out_image=True, out_mask=True):
     image_nii = load_nifti_file(image_file)
     mask_nii = load_nifti_file(mask_file)
@@ -1661,6 +1673,7 @@ def apply_mask(image_file, mask_file, label=None, crop=True, pad_after_crop=5, o
 
     return out_image, out_mask
 
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def compute_shape_histogram(nifti_dir, image_filename):
     x_extents, y_extents, z_extents = [], [], []
 
@@ -1698,116 +1711,7 @@ def compute_shape_histogram(nifti_dir, image_filename):
     
     return extents_95th
 
-def standardize_volume(nifti_dir, metadata_csv=None, metadata_csv_out=None, image_filename="0502_VENOUS.nii", mask_filename="segmentation.nii.gz", mask_value=1, overwrite=False):  # organ=1, tumor=2
-    compute_shape_histogram(nifti_dir, mask_filename, mask_value=mask_value)
-
-    # -------- Second Pass: crop and pad --------
-    half_z = fixed_z // 2
-
-    image_filename_new = image_filename.replace(".nii", "_standardized.nii")
-    mask_filename_new = mask_filename.replace(".nii", "_standardized.nii")
-
-    for caseID in sorted(os.listdir(nifti_dir)):
-        case_dir = os.path.join(nifti_dir, caseID)
-        image_path = os.path.join(case_dir, image_filename)
-        mask_path = os.path.join(case_dir, mask_filename)
-
-        if not os.path.exists(image_path) or not os.path.exists(mask_path):
-            continue
-
-        out_image_path = os.path.join(case_dir, image_filename_new)
-        out_mask_path = os.path.join(case_dir, mask_filename_new)
-
-        if os.path.exists(out_image_path) and os.path.exists(out_mask_path) and not overwrite:
-            continue
-
-        img_nii = nib.load(image_path)
-        mask_nii = nib.load(mask_path)
-
-        img = img_nii.get_fdata()
-        mask = mask_nii.get_fdata()
-
-        tumor_mask = (mask == mask_value)
-
-        if tumor_mask.sum() == 0:
-            logger.warning(f"Skipping {caseID} (no tumor)")
-            continue
-
-        z_indices = np.where(tumor_mask.any(axis=(0, 1)))[0]
-        center_z = int(np.mean(z_indices))
-
-        z_min = center_z - half_z
-        z_max = center_z + half_z
-
-        pad_before = max(0, -z_min)
-        pad_after = max(0, z_max - (img.shape[2] - 1))
-
-        z_min = max(0, z_min)
-        z_max = min(img.shape[2] - 1, z_max)
-
-        cropped_img = img[:, :, z_min : z_max + 1]
-        cropped_mask = mask[:, :, z_min : z_max + 1]
-
-        # Pad if needed
-        if pad_before > 0 or pad_after > 0:
-            cropped_img = np.pad(
-                cropped_img,
-                ((0, 0), (0, 0), (pad_before, pad_after)),
-                mode="constant",
-                constant_values=0,
-            )
-            cropped_mask = np.pad(
-                cropped_mask,
-                ((0, 0), (0, 0), (pad_before, pad_after)),
-                mode="constant",
-                constant_values=0,
-            )
-
-        # Ensure final shape matches fixed_z
-        if cropped_img.shape[2] != fixed_z:
-            # Adjust by trimming or padding
-            diff = fixed_z - cropped_img.shape[2]
-            if diff > 0:
-                cropped_img = np.pad(
-                    cropped_img,
-                    ((0, 0), (0, 0), (0, diff)),
-                    mode="constant",
-                )
-                cropped_mask = np.pad(
-                    cropped_mask,
-                    ((0, 0), (0, 0), (0, diff)),
-                    mode="constant",
-                )
-            else:
-                cropped_img = cropped_img[:, :, :fixed_z]
-                cropped_mask = cropped_mask[:, :, :fixed_z]
-
-        new_img = nib.Nifti1Image(cropped_img, img_nii.affine)
-        new_mask = nib.Nifti1Image(cropped_mask, mask_nii.affine)
-
-        nib.save(new_img, out_image_path)
-        nib.save(new_mask, out_mask_path)
-
-        logger.debug(f"Saved standardized volume for {caseID}")
-    
-    if metadata_csv is not None:
-        total_slices_per_volume = (half_z * 2) + 1
-        if isinstance(metadata_csv, str) and os.path.exists(metadata_csv):
-            metadata_df = pd.read_csv(metadata_csv)
-        elif isinstance(metadata_csv, pd.DataFrame):
-            metadata_df = metadata_csv
-        else:
-            raise ValueError(f"Expected a file path or DataFrame for metadata_csv, got {type(metadata_csv)}")
-        if "Number of Images Standardized" in metadata_df.columns:
-            logger.debug(f"'Number of Images Standardized' column already exists in metadata_csv. It will be overwritten with new value: {total_slices_per_volume}.")
-            metadata_df.drop(columns=["Number of Images Standardized"], inplace=True)
-        metadata_df["Number of Images Standardized"] = total_slices_per_volume
-        if metadata_csv_out is None and isinstance(metadata_csv, str):
-            metadata_csv_out = metadata_csv  # overwrite original
-        metadata_df.to_csv(metadata_csv_out, index=False)
-
-    return image_filename_new, mask_filename_new
-
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def choose_slice_with_most_mask_single_image(image_path, mask_path, mask_value=2, out_image=True, out_mask=True, overwrite=False):
     if out_image is True:
         out_img_path = define_default_out_nifti(image_path, suffix="_best_slice")
@@ -1871,6 +1775,7 @@ def choose_slice_with_most_mask_single_image(image_path, mask_path, mask_value=2
 
     return out_img_path, out_mask_path, slice_info
     
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, out=True, overwrite=False):
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_sized")
@@ -2643,3 +2548,132 @@ def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overla
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
             plt.savefig(out_path, bbox_inches='tight', dpi=300)
         plt.show()
+
+@measure_time_memory_storage(enabled=True, disk_path=lambda: os.path.dirname(nifti_file))
+def nii_to_npy(nifti_file, out=True):
+    if not isinstance(nifti_file, str):
+        raise ValueError(f"Expected a file path for nifti_file, got {type(nifti_file)}")
+    if not os.path.exists(nifti_file):
+        raise FileNotFoundError(f"NIfTI file not found: {nifti_file}")
+
+    nii = nib.load(nifti_file)
+    volume = np.asanyarray(nii.dataobj)
+
+    if out is True:
+        if nifti_file.endswith(".nii.gz"):
+            out = nifti_file[:-7] + ".npy"
+        elif nifti_file.endswith(".nii"):
+            out = nifti_file[:-4] + ".npy"
+        else:
+            out = nifti_file + ".npy"
+    if out:
+        np.save(out, volume)
+        logger.info(f"Saved NumPy volume to {out}")
+    
+    return out
+
+import time
+import subprocess
+import threading
+import psutil
+from functools import wraps
+
+
+def _dir_size_bytes(path):
+    try:
+        return int(subprocess.check_output(["du", "-sb", path]).split()[0])
+    except Exception:
+        return None
+
+
+def measure_time_memory_storage(
+    enabled=True,
+    disk_path=None,
+    interval=0.1,
+):
+
+    def decorator(func):
+
+        if not enabled:
+            return func
+
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+
+            # ---- resolve disk path dynamically ----
+
+            resolved_disk_path = disk_path
+
+            if callable(disk_path):
+                resolved_disk_path = disk_path()
+
+            # ---- monitoring setup ----
+
+            process = psutil.Process()
+            peak_mem = 0
+            running = True
+
+            def monitor():
+                nonlocal peak_mem
+                while running:
+                    try:
+                        mem = process.memory_info().rss
+                        for child in process.children(recursive=True):
+                            try:
+                                mem += child.memory_info().rss
+                            except psutil.NoSuchProcess:
+                                pass
+                        peak_mem = max(peak_mem, mem)
+                    except psutil.NoSuchProcess:
+                        pass
+
+                    time.sleep(interval)
+
+            start_disk = _dir_size_bytes(resolved_disk_path) if resolved_disk_path else None
+            start_time = time.time()
+
+            monitor_thread = threading.Thread(target=monitor, daemon=True)
+            monitor_thread.start()
+
+            try:
+                result = func(*args, **kwargs)
+            finally:
+                running = False
+                monitor_thread.join()
+
+            end_time = time.time()
+            end_disk = _dir_size_bytes(resolved_disk_path) if resolved_disk_path else None
+
+            elapsed = end_time - start_time
+            peak_mem_gb = peak_mem / 1e9
+
+            disk_change = None
+            if resolved_disk_path and start_disk is not None and end_disk is not None:
+                disk_change = (end_disk - start_disk) / 1e9
+
+            metrics = {
+                "time": elapsed,
+                "peak_mem_gb": peak_mem_gb,
+                "disk_written_gb": disk_change,
+            }
+            wrapper.last_metrics = metrics
+            
+            # logger.info("----- Resource usage -----")
+            # logger.info(f"Wall time: {elapsed:.2f} sec")
+            # logger.info(f"Peak memory (process tree): {peak_mem_gb:.2f} GB")
+            # if disk_change is not None:
+            #     logger.info(f"Disk written: {disk_change:.2f} GB")
+            # logger.info("--------------------------")
+
+            return result
+
+        return wrapper
+
+    return decorator
+
+def add_metrics(metrics, total=None):
+    if total is None:
+        total = {"time": 0, "peak_mem": 0, "disk": 0}
+    total["time"] += metrics["time"]
+    total["peak_mem"] += metrics["peak_mem_gb"]
+    total["disk"] += metrics["disk_written_gb"]

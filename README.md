@@ -1,5 +1,9 @@
 # TCGA Radiogenomics Processing Protocol
 
+Radiology image processing of TCGA/TCIA data.
+
+![alt text](https://github.com/pachterlab/cellsweep/blob/main/figures/fig1.png?raw=true)
+
 ## Getting Started
 
 To run the code in this repository, follow these steps:
