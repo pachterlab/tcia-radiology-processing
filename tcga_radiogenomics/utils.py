@@ -150,7 +150,7 @@ def add_metrics(metrics, total=None):
     if total is None:
         total = {"time": 0, "peak_mem": 0, "disk": 0}
     total["time"] += metrics["time"]
-    total["peak_mem"] += metrics["peak_mem_gb"]
+    total["peak_mem"] = max(total["peak_mem"], metrics["peak_mem_gb"])
     if metrics["disk_written_gb"] is not None:
         total["disk"] += metrics["disk_written_gb"]
     return total
@@ -431,7 +431,7 @@ def pad_image_and_mask(
 
     return padded_image_file, padded_mask_file
 
-
+@measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def normalize_intensity(
     image_paths,
     normalization_method="volume",  # "volume" or "dataset"
@@ -494,9 +494,11 @@ def normalize_intensity(
         if normalization_method == "volume":
             mean = arr.mean()
             std = arr.std()
-        else:
+        elif normalization_method == "dataset":
             mean = global_mean
             std = global_std
+        else:
+            raise ValueError("Invalid normalization method")
 
         if std == 0:
             raise ValueError("Standard deviation is zero — cannot normalize.")
@@ -670,7 +672,7 @@ def add_viable_info(dcm_dir, metadata_csv, min_files=5, max_thickness_mm=10, out
 
     case_viable, viable_reason = [], []
     for _, row in tqdm(metadata_df.iterrows(), total=len(metadata_df), desc="Processing cases"):
-        case_id = row["caseID"]
+        case_id = row["series_id"]
         series_uid = row["Series UID"]
 
         if series_uid not in series_to_folder:
@@ -714,7 +716,7 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
     manually_created_niftis = []
     no_niftis = []
     for _, row in tqdm(imaging_metadata_df.iterrows(), total=len(imaging_metadata_df), desc="Processing cases"):
-        case_id = row["caseID"]
+        case_id = row["series_id"]
         series_uid = row["Series UID"]
 
         case_outdir = os.path.join(nifti_dir, case_id)
@@ -807,7 +809,7 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
         # Segmentation conversion
         # -------------------
         if segmentation_dcm_dir is not None and segmentation_metadata_df is not None:
-            seg_match = segmentation_metadata_df[segmentation_metadata_df["caseID"] == case_id]
+            seg_match = segmentation_metadata_df[segmentation_metadata_df["series_id"] == case_id]
 
             if len(seg_match) == 0:
                 logger.info(f"no segmentation metadata found for {case_id}")
@@ -893,7 +895,7 @@ def add_orientation_column(base_dir):
 
         if not json_files:
             records.append({
-                "caseID": case_id,
+                "series_id": case_id,
                 "Imaging Plane": None,
                 "json_file": None
             })
@@ -913,7 +915,7 @@ def add_orientation_column(base_dir):
             orientation = orientation_from_iop(iop)
 
         records.append({
-            "caseID": case_id,
+            "series_id": case_id,
             "Imaging Plane": orientation,
             "json_file": os.path.basename(json_path)
         })
@@ -994,10 +996,10 @@ def download_tcga_kirc_imaging_data(tcga_kirc_imaging_data_dir, nbia_data_retrie
     
     segmentation_metadata_csv = os.path.join(segmentation_dcm_dir, "qa-results.csv")
     segmentation_metadata_df = pd.read_csv(segmentation_metadata_csv)
-    if "caseID" not in segmentation_metadata_df.columns:
+    if "series_id" not in segmentation_metadata_df.columns:
         segmentation_metadata_df.rename(columns={"SeriesInstanceUID": "Series UID"}, inplace=True)
-        segmentation_metadata_df = segmentation_metadata_df.merge(imaging_metadata_df[["caseID", "Series UID"]], on="Series UID", how="left")
-        segmentation_metadata_df = segmentation_metadata_df[["caseID"] + [col for col in segmentation_metadata_df.columns if col != "caseID"]]
+        segmentation_metadata_df = segmentation_metadata_df.merge(imaging_metadata_df[["series_id", "Series UID"]], on="Series UID", how="left")
+        segmentation_metadata_df = segmentation_metadata_df[["series_id"] + [col for col in segmentation_metadata_df.columns if col != "series_id"]]
         segmentation_metadata_df.to_csv(segmentation_metadata_csv, index=False)
     
     nifti_dir = os.path.join(tcga_kirc_imaging_data_dir, "nifti")
@@ -1009,7 +1011,7 @@ def download_tcga_kirc_imaging_data(tcga_kirc_imaging_data_dir, nbia_data_retrie
 
     # if "Imaging Plane" not in imaging_metadata_df.columns:
     #     orientation_df = add_orientation_column(nifti_dir)
-    #     imaging_metadata_df = imaging_metadata_df.merge(orientation_df[["caseID", "Imaging Plane"]], on="caseID", how="left")
+    #     imaging_metadata_df = imaging_metadata_df.merge(orientation_df[["series_id", "Imaging Plane"]], on="series_id", how="left")
     #     imaging_metadata_df.to_csv(imaging_metadata_csv, index=False)
 
     return nifti_dir
@@ -1029,23 +1031,23 @@ def download_tcga_kirc_imaging_metadata(imaging_metadata_csv, overwrite=False):
     
     # add short patient ID
     imaging_metadata_df = pd.read_excel(additional_metadata_xlsx)
-    if "caseID" not in imaging_metadata_df.columns:
-        imaging_metadata_df.insert(0, "caseID", [f"case_{i:05d}" for i in range(len(imaging_metadata_df))])
+    if "series_id" not in imaging_metadata_df.columns:
+        imaging_metadata_df.insert(0, "series_id", [f"case_{i:05d}" for i in range(len(imaging_metadata_df))])
     
     # change column names to match old format
     col_renames = {
         "Series Instance UID": "Series UID",
-        "Study Instance UID": "Study UID",
-        "Patient ID": "Subject ID",
+        "Study Instance UID": "study_id",
+        "Patient ID": "patient_id",
         "Image Count": "Number of Images Original",
     }
     imaging_metadata_df.rename(columns=col_renames, inplace=True)
     imaging_metadata_df.to_csv(imaging_metadata_csv, index=False)
     
-    # # save text file of Subject IDs
+    # # save text file of patient_ids
     # subject_ids_txt = os.path.join(imaging_metadata_csv_dir, "subject_ids.txt")
     # with open(subject_ids_txt, "w") as sf:
-    #     for sid in imaging_metadata_df["Subject ID"].unique():
+    #     for sid in imaging_metadata_df["patient_id"].unique():
     #         sf.write(f"{sid}\n")
 
 def get_seriesid_from_dicom_zip(zip_path, return_val=None):
@@ -1103,13 +1105,13 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
     rows = []
     for root, dirs, files in tqdm(os.walk(src_dir), desc="Processing USC TCGA-KIRC data"):
         row_dict = {}
-        seriesid_to_caseid = {}
+        seriesid_to_series_id = {}
         for fname in files:
             if fname in target_files:
                 # full source path
                 src_path = os.path.join(root, fname)
 
-                # caseID = first folder after src_dir
+                # series_id = first folder after src_dir
                 rel_path = os.path.relpath(src_path, src_dir)
                 patient_id = rel_path.split(os.sep)[0]
                 case_id = patient_id
@@ -1119,7 +1121,7 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
                 study_id = dcm.StudyInstanceUID
                 series_description = getattr(dcm, "SeriesDescription", "")
                 modality = dcm.Modality
-                seriesid_to_caseid[series_id] = case_id
+                seriesid_to_series_id[series_id] = case_id
 
                 # build destination path
                 dst_dir = os.path.join(dst_root, case_id)
@@ -1134,10 +1136,10 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
                     shutil.copy2(src_path, dst_path)
 
                 if len(row_dict) == 0:  # only add metadata once per case
-                    row_dict["caseID"] = case_id
+                    row_dict["series_id"] = case_id
                     row_dict["Project"] = "tcga-kirc"
-                    row_dict["Subject ID"] = patient_id
-                    row_dict["Study UID"] = study_id
+                    row_dict["patient_id"] = patient_id
+                    row_dict["study_id"] = study_id
                     row_dict["Series UID"] = series_id
                     row_dict["Series Description"] = series_description
                     row_dict["Modality"] = modality  # all are CT
@@ -1195,20 +1197,20 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
     #         imaging_metadata_df = imaging_metadata_csv
     #     else:
     #         raise ValueError(f"Expected a file path or DataFrame for imaging_metadata_csv, got {type(imaging_metadata_csv)}")
-    #     # make imaging_metadata_df["caseID_usc"] by merging key of seriesid_to_caseid with imaging_metadata_df["Series UID"]
-    #     if "caseID_usc" in imaging_metadata_df.columns:
-    #         imaging_metadata_df.drop(columns=["caseID_usc"], inplace=True)  # drop it
-    #     imaging_metadata_df["caseID_usc"] = imaging_metadata_df["Series UID"].map(seriesid_to_caseid)
+    #     # make imaging_metadata_df["series_id_usc"] by merging key of seriesid_to_series_id with imaging_metadata_df["Series UID"]
+    #     if "series_id_usc" in imaging_metadata_df.columns:
+    #         imaging_metadata_df.drop(columns=["series_id_usc"], inplace=True)  # drop it
+    #     imaging_metadata_df["series_id_usc"] = imaging_metadata_df["Series UID"].map(seriesid_to_series_id)
     # else:  # creates it new
     #     imaging_metadata_df = pd.DataFrame(rows)
     
     imaging_metadata_df = pd.DataFrame(rows)  #? erase if I can match cases to original TCGA metadata
 
-    if "Subject ID" not in imaging_metadata_df.columns:
-        imaging_metadata_df.insert(1, "Subject ID", imaging_metadata_df["caseID"])  # copy caseID
+    if "patient_id" not in imaging_metadata_df.columns:
+        imaging_metadata_df.insert(1, "patient_id", imaging_metadata_df["series_id"])  # copy series_id
 
     if not isinstance(imaging_metadata_csv, str):
-        imaging_metadata_csv = os.path.join(dst_root, "imaging_metadata.csv")
+        imaging_metadata_csv = os.path.join(dst_root, "metadata_usc.csv")
     imaging_metadata_df.to_csv(imaging_metadata_csv, index=False)
     logger.info(f"Saved USC TCGA-KIRC imaging metadata for {len(imaging_metadata_df)} series to {imaging_metadata_csv}")
 
@@ -1241,6 +1243,9 @@ def fill_hole_and_morphological_close(left_nii, fill_holes=True, morphological_c
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, metadata_csv_out=None, remove_small_blobs=True, fill_holes=True, morphological_closing=True, image_filename="0502_VENOUS.nii", tumor_mask_filename="segmentation_tumor.nii.gz", combined_organ_mask_filename="segmentation_organs_combined.nii.gz", mask_filename_out="segmentation.nii.gz", overwrite=False, visualize=True, orient=True):
+    if selected_segmentations is None or len(selected_segmentations) == 0:
+        raise ValueError("selected_segmentations must be a non-empty list of segmentation names to include in the combined mask.")
+
     if metadata_csv is not None:
         if isinstance(metadata_csv, str) and os.path.exists(metadata_csv):
             metadata_df = pd.read_csv(metadata_csv)
@@ -1263,18 +1268,18 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
     
     # iterate through subdirs of nifti_dir
     case_id_to_organ_overlap = {}
-    for caseID in sorted(os.listdir(nifti_dir)):
-        nifti_case_dir = os.path.join(nifti_dir, caseID)
+    for series_id in sorted(os.listdir(nifti_dir)):
+        nifti_case_dir = os.path.join(nifti_dir, series_id)
         if not os.path.isdir(nifti_case_dir):
             continue
 
         if not os.path.exists(nifti_case_dir):
-            logger.warning(f"NIfTI directory not found for caseID {caseID} at {nifti_case_dir}")
+            logger.warning(f"NIfTI directory not found for series_id {series_id} at {nifti_case_dir}")
             continue
 
         modality = "CT"
         if metadata_df is not None:
-            row = metadata_df[metadata_df['caseID'] == caseID]
+            row = metadata_df[metadata_df['series_id'] == series_id]
             if not row.empty:
                 modality = row['Modality'].values[0]
 
@@ -1288,13 +1293,13 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
             totalsegmentator_command += ["--remove_small_blobs"]
         
         if all(os.path.exists(os.path.join(totalsegmentator_dir, f"{seg_name}.nii.gz")) for seg_name in selected_segmentations) and not overwrite:
-            logger.info(f"TotalSegmentator has already been run for caseID {caseID}.")
+            logger.info(f"TotalSegmentator has already been run for series_id {series_id}.")
         else:
-            logger.info(f"Running TotalSegmentator for caseID {caseID} with command: {' '.join(totalsegmentator_command)}")
+            logger.info(f"Running TotalSegmentator for series_id {series_id} with command: {' '.join(totalsegmentator_command)}")
             subprocess.run(totalsegmentator_command, check=True)
 
         if not all(os.path.exists(os.path.join(totalsegmentator_dir, f"{seg_name}.nii.gz")) for seg_name in selected_segmentations):
-            logger.info(f"Predicted segmentation files not found for caseID {caseID}. Skipping.")
+            logger.info(f"Predicted segmentation files not found for series_id {series_id}. Skipping.")
             continue
 
         #* combine all organ segmentations
@@ -1306,7 +1311,7 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
             for seg_name in selected_segmentations:
                 seg_path = os.path.join(totalsegmentator_dir, f"{seg_name}.nii.gz")
                 niis[seg_name] = nib.load(seg_path)
-            logger.info(f"Combining full organ segmentations for caseID {caseID}...")
+            logger.info(f"Combining full organ segmentations for series_id {series_id}...")
 
             # Sanity checks
             shapes = [nii.shape for nii in niis.values()]
@@ -1317,7 +1322,7 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
             #* manual updates
             if fill_holes or morphological_closing:
                 for seg_name, seg_nii in niis.items():
-                    logger.info(f"Applying hole filling and morphological closing to {seg_name} segmentation for caseID {caseID}...")
+                    logger.info(f"Applying hole filling and morphological closing to {seg_name} segmentation for series_id {series_id}...")
                     niis[seg_name] = fill_hole_and_morphological_close(seg_nii, fill_holes=fill_holes, morphological_closing=morphological_closing)
 
             # Union
@@ -1330,7 +1335,7 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
 
             # # orient - already done automatically
             # if orient:
-            #     logger.info(f"Reorienting combined segmentation to RAS for caseID {caseID}...")
+            #     logger.info(f"Reorienting combined segmentation to RAS for series_id {series_id}...")
             #     union_nii = nib.as_closest_canonical(union_nii)
 
             nib.save(union_nii, predicted_organ_segmentation_file_combined)
@@ -1342,7 +1347,7 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
                 # copy predicted_organ_segmentation_file_combined to combined_organ_tumor_segmentation_file
                 shutil.copy2(predicted_organ_segmentation_file_combined, combined_organ_tumor_segmentation_file)
             else:
-                logger.info(f"Combining organ and tumor segmentations for caseID {caseID}...")
+                logger.info(f"Combining organ and tumor segmentations for series_id {series_id}...")
                 tumor_nii = nib.load(tumor_segmentation_file)
 
                 union_orient = nib.orientations.aff2axcodes(union_nii.affine)
@@ -1385,13 +1390,13 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
                         overlapping_organs.append(seg_name)
                         combined[organ] = 1
                 if len(overlapping_organs) == 0:
-                    logger.warning(f"No overlap found between tumor and any organ for caseID {caseID}. Will keep all organs.")
+                    logger.warning(f"No overlap found between tumor and any organ for series_id {series_id}. Will keep all organs.")
                     for seg_name, seg_nii in niis.items():
                         organ = seg_nii.get_fdata() > 0
                         combined[organ] = 1
 
                 combined[tumor] = 2  # tumor + organ gets labeled 2, organ alone gets labeled 1 (if there is a tumor in some part of this organ), background gets labeled 0
-                case_id_to_organ_overlap[caseID] = ",".join(overlapping_organs) if overlapping_organs else "none"
+                case_id_to_organ_overlap[series_id] = ",".join(overlapping_organs) if overlapping_organs else "none"
 
                 # Save
                 combined_nii = nib.Nifti1Image(combined, tumor_nii.affine, tumor_nii.header)
@@ -1399,7 +1404,7 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
 
         #* visualize
         if visualize:
-            logger.info(f"Visualizing caseID {caseID}...")
+            logger.info(f"Visualizing series_id {series_id}...")
             
             #* loading
             # image
@@ -1416,10 +1421,10 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
             num_plots = 2
             vmin, vmax = None, None  # -200, 300  # soft tissue window
 
-            for z in tqdm(range(img.shape[2]), desc=f"Visualizing slices for caseID {caseID}"):
+            for z in tqdm(range(img.shape[2]), desc=f"Visualizing slices for series_id {series_id}"):
                 logger.debug(f"Slice {z}: Image min={img[:, :, z].min()}, max={img[:, :, z].max()}, mean={img[:, :, z].mean()}; Mask unique values={np.unique(mask_totalsegmentator[:, :, z])}")
 
-                title = f"{caseID}_slice{z:03d}"
+                title = f"{series_id}_slice{z:03d}"
                 out_path = os.path.join(totalsegmentator_dir, "visualization", f"{title}.png")
                 out_path_with_organ = out_path.replace(".png", "_K.png")  # add suffix for slices with organ pixels
 
@@ -1459,8 +1464,8 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
             logger.debug(f"Metadata CSV {metadata_csv} already contains 'tumor_side' column. It will be overwritten with new values based on TotalSegmentator results.")
             metadata_df.drop(columns=["tumor_side"], inplace=True)
         if "tumor_side" not in metadata_df.columns:
-            tumor_side_df = pd.DataFrame(list(case_id_to_organ_overlap.items()), columns=["caseID", "tumor_side"])
-            metadata_df = metadata_df.merge(tumor_side_df, on="caseID", how="left")
+            tumor_side_df = pd.DataFrame(list(case_id_to_organ_overlap.items()), columns=["series_id", "tumor_side"])
+            metadata_df = metadata_df.merge(tumor_side_df, on="series_id", how="left")
         if metadata_csv_out is None and isinstance(metadata_csv, str):
             metadata_csv_out = metadata_csv
         metadata_df.to_csv(metadata_csv_out, index=False)
@@ -1492,7 +1497,7 @@ def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogeno
     raw_image_data_dir/CASE_ID/
         {imaging_file_name}
         {mask_file_name}
-    metadata_df: optional DataFrame with metadata to merge (must contain 'caseID' column)
+    metadata_df: optional DataFrame with metadata to merge (must contain 'series_id' column)
     """
     if os.path.exists(output_csv_path) and os.path.getsize(output_csv_path) > 0:
         if not overwrite:
@@ -1521,7 +1526,7 @@ def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogeno
             mask_path = None
 
         input_data.append({
-            "caseID": case_dir,
+            "series_id": case_dir,
             "Image": image_path,
             "Mask": mask_path,
         })
@@ -1538,14 +1543,14 @@ def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogeno
             metadata_df = pd.read_csv(metadata_df)
         if not isinstance(metadata_df, pd.DataFrame):
             raise ValueError("metadata_df must be a pandas DataFrame or a valid CSV file path.")
-        if "caseID" not in metadata_df.columns:
-            raise ValueError("metadata_df must contain 'caseID' column for merging.")
+        if "series_id" not in metadata_df.columns:
+            raise ValueError("metadata_df must contain 'series_id' column for merging.")
         if metadata_df_columns_to_merge is not None:
-            if "caseID" in metadata_df_columns_to_merge:
-                metadata_df_columns_to_merge.remove("caseID")  # avoid duplication
+            if "series_id" in metadata_df_columns_to_merge:
+                metadata_df_columns_to_merge.remove("series_id")  # avoid duplication
             metadata_df_columns_to_merge = [col for col in metadata_df_columns_to_merge if col in metadata_df.columns]
-            metadata_df = metadata_df[["caseID"] + metadata_df_columns_to_merge]
-        input_df = input_df.merge(metadata_df, on="caseID", how="left")
+            metadata_df = metadata_df[["series_id"] + metadata_df_columns_to_merge]
+        input_df = input_df.merge(metadata_df, on="series_id", how="left")
     
     if series_description_keywords_exclude == "default":
         logger.info(f"Using default series description keywords to exclude for radiomics: {SERIES_DESCRIPTION_KEYWORDS_EXCLUDE_RADIOMICS}. To disable this filtering, set series_description_keywords_exclude to None.")
@@ -1605,7 +1610,7 @@ def perform_radiomics_pipeline(input_csv_path, output_csv_path, threads=1, param
 
     radiomics_df = pd.read_csv(input_csv_path)
 
-    if image_column not in radiomics_df.columns or mask_column not in radiomics_df.columns or "caseID" not in radiomics_df.columns:
+    if image_column not in radiomics_df.columns or mask_column not in radiomics_df.columns or "series_id" not in radiomics_df.columns:
         raise ValueError(f"Input CSV {input_csv_path} must contain '{image_column}' and '{mask_column}' columns.")
     
     logger.info(f"Starting radiomics feature extraction for {input_csv_path}...")
@@ -1622,12 +1627,12 @@ def perform_radiomics_pipeline(input_csv_path, output_csv_path, threads=1, param
             radiomics_df = radiomics_df.drop(idx)
             continue
         radiomic_features_individual = perform_pyradiomics_on_single_image_and_mask(image_path, mask_path, params=param, label=label)  #? investigate multithreading
-        radiomic_features_individual["caseID"] = row["caseID"]
+        radiomic_features_individual["series_id"] = row["series_id"]
         radiomic_features.append(radiomic_features_individual)
 
     # merge all individual feature dictionaries into a single DataFrame
     radiomic_features_df = pd.DataFrame(radiomic_features)
-    radiomics_df = radiomics_df.merge(radiomic_features_df, on="caseID", how="left")
+    radiomics_df = radiomics_df.merge(radiomic_features_df, on="series_id", how="left")
     radiomics_df.to_csv(output_csv_path, index=False)
 
     logger.info(f"Radiomics feature extraction completed. Features saved to {output_csv_path}")
@@ -1793,8 +1798,8 @@ def compute_shape_histogram(nifti_dir, image_filename):
     x_extents, y_extents, z_extents = [], [], []
 
     # -------- First Pass: compute tumor z-extent for all cases --------
-    for caseID in sorted(os.listdir(nifti_dir)):
-        case_dir = os.path.join(nifti_dir, caseID)
+    for series_id in sorted(os.listdir(nifti_dir)):
+        case_dir = os.path.join(nifti_dir, series_id)
         image_path = os.path.join(case_dir, image_filename)
 
         if not os.path.exists(image_path):
@@ -1953,12 +1958,12 @@ def process_images(nifti_dir, orient=False, resample=False, target_spacing=(0.8,
     # walk through all subdirs
     image_filename_set, mask_filename_set = set(), set()
     image_files = []
-    for caseID in tqdm(sorted(os.listdir(nifti_dir)), desc="Processing images"):
-        case_dir = os.path.join(nifti_dir, caseID)
+    for series_id in tqdm(sorted(os.listdir(nifti_dir)), desc="Processing images"):
+        case_dir = os.path.join(nifti_dir, series_id)
         image_file = os.path.join(case_dir, image_filename)
         mask_file = os.path.join(case_dir, mask_filename)
         if not os.path.exists(image_file):
-            logger.warning(f"Image file not found for caseID {caseID} at {image_file}. Skipping.")
+            logger.warning(f"Image file not found for series_id {series_id} at {image_file}. Skipping.")
             continue
 
         if orient:
@@ -2171,12 +2176,12 @@ def print_tcia_info(df, project=None, series_uid_col=None, study_uid_col=None, p
                 series_uid_col = col
                 break
     if study_uid_col is None:
-        for col in ["Study Instance UID", "Study UID"]:
+        for col in ["Study Instance UID", "study_id"]:
             if col in df.columns:
                 study_uid_col = col
                 break
     if patient_id_col is None:
-        for col in ["Patient ID", "Subject ID"]:
+        for col in ["Patient ID", "patient_id"]:
             if col in df.columns:
                 patient_id_col = col
                 break
@@ -2296,14 +2301,14 @@ def create_totalseg_scirep_dice_histograms(totalseg_dir, scirep_dir, segmentatio
     totalseg_scirepcorr_dice_scores_dict = {label: {} for label in labels_dict.keys()}
 
     for idx, row in segmentation_metadata_df.iterrows():
-        case_id = row["caseID"]
+        case_id = row["series_id"]
         patient_id = row["PatientID"]
         study_uid = row["StudyInstanceUID"]
         series_uid = row["SeriesInstanceUID"]
         ai_segmentation_filename = row["AISegmentation"]
         corrected_segmentation_filename = row["CorrectedSegmentation"]
 
-        logger.debug(f"Patient ID: {patient_id}, Study UID: {study_uid}, Series UID: {series_uid}")
+        logger.debug(f"Patient ID: {patient_id}, study_id: {study_uid}, Series UID: {series_uid}")
 
         totalsegmentator_mask_path = os.path.join(totalseg_dir, case_id, mask_filename)
         scirep_mask_ai_path = os.path.join(scirep_dir, "ai-segmentations-dcm", ai_segmentation_filename)
@@ -2392,7 +2397,7 @@ def add_acquisition_time(metadata_df, dcm_dir):
 
     acquisition_times = []
     for _, row in tqdm(metadata_df.iterrows(), total=len(metadata_df), desc="Processing cases"):
-        case_id = row["caseID"]
+        case_id = row["series_id"]
         series_uid = row["Series UID"]
 
         if series_uid not in series_to_folder:
@@ -2429,9 +2434,9 @@ def update_phase_column_with_acquisition_time(metadata_df, dcm_dir=None):
     if "Acquisition Time" not in metadata_df.columns:
         metadata_df = add_acquisition_time(metadata_df, dcm_dir)
     
-    study_ids = metadata_df["Study UID"].unique()
+    study_ids = metadata_df["study_id"].unique()
     for study_id in tqdm(study_ids, desc="Updating phase labels based on acquisition time"):
-        study_mask = metadata_df["Study UID"] == study_id
+        study_mask = metadata_df["study_id"] == study_id
         study_df = metadata_df[study_mask].copy()
 
         # Restrict to viable CT only
@@ -2488,7 +2493,7 @@ def update_phase_column_with_acquisition_time(metadata_df, dcm_dir=None):
 
 def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_maximum=20, filter_from_metadata=True, image_filename="imaging.nii.gz"):
     is_4d, max_zooms = {}, {}
-    for case_id in metadata_df["caseID"].unique():
+    for case_id in metadata_df["series_id"].unique():
         case_dir = os.path.join(nifti_dir, case_id)
         nifti_path = os.path.join(case_dir, image_filename)
         if not os.path.exists(nifti_path):
@@ -2511,19 +2516,19 @@ def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_max
                 if os.path.exists(case_dir):
                     shutil.rmtree(case_dir, ignore_errors=True)
     
-    # merge is_4d info back to metadata_df by caseID
+    # merge is_4d info back to metadata_df by series_id
     if is_4d:
         if "is_4d" in metadata_df.columns:
             metadata_df.drop(columns=["is_4d"], inplace=True)
-        is_4d_df = pd.DataFrame(list(is_4d.items()), columns=["caseID", "is_4d"])
-        metadata_df = metadata_df.merge(is_4d_df, on="caseID", how="left")
+        is_4d_df = pd.DataFrame(list(is_4d.items()), columns=["series_id", "is_4d"])
+        metadata_df = metadata_df.merge(is_4d_df, on="series_id", how="left")
         if filter_from_metadata:
             metadata_df = metadata_df[~metadata_df["is_4d"]].copy()  # filter out 4D cases from metadata if they were deleted from dataset
     if max_zoom_maximum is not None:
         if "max_zoom" in metadata_df.columns:
             metadata_df.drop(columns=["max_zoom"], inplace=True)
-        max_zooms_df = pd.DataFrame(list(max_zooms.items()), columns=["caseID", "max_zoom"])
-        metadata_df = metadata_df.merge(max_zooms_df, on="caseID", how="left")
+        max_zooms_df = pd.DataFrame(list(max_zooms.items()), columns=["series_id", "max_zoom"])
+        metadata_df = metadata_df.merge(max_zooms_df, on="series_id", how="left")
         if filter_from_metadata:
             metadata_df = metadata_df[metadata_df["max_zoom"] <= max_zoom_maximum].copy()  # filter out cases with zoom values exceeding the maximum threshold from metadata if they were deleted from dataset
     return metadata_df
@@ -2531,7 +2536,7 @@ def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_max
 
 def check_few_slices(metadata_df, nifti_dir, image_filename="imaging.nii.gz"):
     is_4d = {}
-    for case_id in metadata_df["caseID"].unique():
+    for case_id in metadata_df["series_id"].unique():
         case_dir = os.path.join(nifti_dir, case_id)
         nifti_path = os.path.join(case_dir, image_filename)
         if not os.path.exists(nifti_path):
@@ -2547,9 +2552,9 @@ def check_few_slices(metadata_df, nifti_dir, image_filename="imaging.nii.gz"):
                 logger.warning(f"Case {case_id} appears to have 4D NIfTI image. This may indicate a DICOM series with multiple time points or phases that was incorrectly converted to a single 4D NIfTI file. Please review the original DICOM data for this case to determine if it should be split into separate series for each phase/time point. For now, this case will be marked as 4D in the metadata and removed from the dataset.")
                 shutil.rmtree(case_dir, ignore_errors=True)
     
-    # merge is_4d info back to metadata_df by caseID
-    is_4d_df = pd.DataFrame(list(is_4d.items()), columns=["caseID", "is_4d"])
-    metadata_df = metadata_df.merge(is_4d_df, on="caseID", how="left")
+    # merge is_4d info back to metadata_df by series_id
+    is_4d_df = pd.DataFrame(list(is_4d.items()), columns=["series_id", "is_4d"])
+    metadata_df = metadata_df.merge(is_4d_df, on="series_id", how="left")
     return metadata_df
 
 
@@ -2676,9 +2681,6 @@ def nii_to_npy(nifti_file, out=True):
     if not os.path.exists(nifti_file):
         raise FileNotFoundError(f"NIfTI file not found: {nifti_file}")
 
-    nii = nib.load(nifti_file)
-    volume = np.asanyarray(nii.dataobj)
-
     if out is True:
         if nifti_file.endswith(".nii.gz"):
             out = nifti_file[:-7] + ".npy"
@@ -2686,6 +2688,12 @@ def nii_to_npy(nifti_file, out=True):
             out = nifti_file[:-4] + ".npy"
         else:
             out = nifti_file + ".npy"
+    
+    if out is not None and os.path.exists(out):
+        return out
+    
+    nii = nib.load(nifti_file)
+    volume = np.asanyarray(nii.dataobj)
     
     if out is None:
         return volume
