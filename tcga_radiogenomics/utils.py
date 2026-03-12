@@ -404,7 +404,7 @@ def pad_image_and_mask(
 
         if not os.path.exists(padded_image_file) or overwrite:
             nib.save(
-                nib.Nifti1Image(padded_img, img.affine, img.header),
+                nib.Nifti1Image(padded_img, img.affine, img.header.copy()),
                 padded_image_file,
             )
     else:
@@ -423,7 +423,7 @@ def pad_image_and_mask(
 
             if not os.path.exists(padded_mask_file) or overwrite:
                 nib.save(
-                    nib.Nifti1Image(padded_mask, mask.affine, mask.header),
+                    nib.Nifti1Image(padded_mask, mask.affine, mask.header.copy()),
                     padded_mask_file,
                 )
         else:
@@ -671,7 +671,7 @@ def add_viable_info(dcm_dir, metadata_csv, min_files=5, max_thickness_mm=10, out
     series_to_folder = make_series_to_folder_mapping(dcm_dir)
 
     case_viable, viable_reason = [], []
-    for _, row in tqdm(metadata_df.iterrows(), total=len(metadata_df), desc="Processing cases"):
+    for _, row in tqdm(metadata_df.iterrows(), total=len(metadata_df), desc="Processing series"):
         case_id = row["series_id"]
         series_uid = row["Series UID"]
 
@@ -715,7 +715,7 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
     
     manually_created_niftis = []
     no_niftis = []
-    for _, row in tqdm(imaging_metadata_df.iterrows(), total=len(imaging_metadata_df), desc="Processing cases"):
+    for _, row in tqdm(imaging_metadata_df.iterrows(), total=len(imaging_metadata_df), desc="Processing series"):
         case_id = row["series_id"]
         series_uid = row["Series UID"]
 
@@ -866,8 +866,8 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
             
             logger.info(f"Segmentation conversion completed for {case_id}")
     
-    logger.info(f"Manually created NIfTIs for {len(manually_created_niftis)} cases: {', '.join(manually_created_niftis)}")
-    logger.info(f"No NIfTI could be created for {len(no_niftis)} cases: {', '.join(no_niftis)}")
+    logger.info(f"Manually created NIfTIs for {len(manually_created_niftis)} series: {', '.join(manually_created_niftis)}")
+    logger.info(f"No NIfTI could be created for {len(no_niftis)} series: {', '.join(no_niftis)}")
 
 def add_orientation_column(base_dir):
 
@@ -1032,7 +1032,7 @@ def download_tcga_kirc_imaging_metadata(imaging_metadata_csv, overwrite=False):
     # add short patient ID
     imaging_metadata_df = pd.read_excel(additional_metadata_xlsx)
     if "series_id" not in imaging_metadata_df.columns:
-        imaging_metadata_df.insert(0, "series_id", [f"case_{i:05d}" for i in range(len(imaging_metadata_df))])
+        imaging_metadata_df.insert(0, "series_id", [f"series_{i:05d}" for i in range(len(imaging_metadata_df))])
     
     # change column names to match old format
     col_renames = {
@@ -1086,7 +1086,7 @@ def get_seriesid_from_dicom_zip(zip_path, return_val=None):
     else:
         return dcm
 
-def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=None, src_dir_name="TCIA KIRC N190", dst_dir_name="nifti", num_cases=None):
+def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=None, src_dir_name="TCIA KIRC N190", dst_dir_name="nifti", num_series=None):
     # rsync -avz "/Volumes/radiology/RenalSeg/TCIA KIRC N190" <usc_tcga_kirc_data_dir>/TCIA KIRC N190
     if not os.path.exists(usc_tcga_kirc_data_dir) or len(os.listdir(usc_tcga_kirc_data_dir)) == 0:
         raise FileNotFoundError(f"TCGA-KIRC-USC directory {usc_tcga_kirc_data_dir} does not exist or is empty. Because it is a private dataset, it must be initially downloaded manually. Please provide the path to the directory containing the USC-segmented TCGA-KIRC data.")
@@ -1114,17 +1114,17 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
                 # series_id = first folder after src_dir
                 rel_path = os.path.relpath(src_path, src_dir)
                 patient_id = rel_path.split(os.sep)[0]
-                case_id = patient_id
+                series_id = patient_id
                 dcm_zip_path = os.path.join(os.path.dirname(root), "DICOM.zip")
                 dcm = get_seriesid_from_dicom_zip(dcm_zip_path)
                 series_id = dcm.SeriesInstanceUID
                 study_id = dcm.StudyInstanceUID
                 series_description = getattr(dcm, "SeriesDescription", "")
                 modality = dcm.Modality
-                seriesid_to_series_id[series_id] = case_id
+                seriesid_to_series_id[series_id] = series_id
 
                 # build destination path
-                dst_dir = os.path.join(dst_root, case_id)
+                dst_dir = os.path.join(dst_root, series_id)
                 dst_path = os.path.join(dst_dir, fname)
 
                 # ensure destination exists
@@ -1135,8 +1135,8 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
                     logger.info(f"Copying {src_path} -> {dst_path}")
                     shutil.copy2(src_path, dst_path)
 
-                if len(row_dict) == 0:  # only add metadata once per case
-                    row_dict["series_id"] = case_id
+                if len(row_dict) == 0:  # only add metadata once per series
+                    row_dict["series_id"] = series_id
                     row_dict["Project"] = "tcga-kirc"
                     row_dict["patient_id"] = patient_id
                     row_dict["study_id"] = study_id
@@ -1151,8 +1151,8 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
         if len(row_dict) > 0:
             rows.append(row_dict)
         
-        if num_cases is not None and len(rows) >= num_cases:
-            logger.info(f"Reached specified number of cases ({num_cases}), stopping further processing.")
+        if num_series is not None and len(rows) >= num_series:
+            logger.info(f"Reached specified number of series ({num_series}), stopping further processing.")
             break
     
     def convert_tumor_mask_kirc_usc(dst_root):
@@ -1178,7 +1178,7 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
                     binary_mask = np.where(data != min_val, tumor_value, background_value).astype(np.uint8)
 
                     # Create new image with same affine/header
-                    new_img = nib.Nifti1Image(binary_mask, img.affine, img.header)
+                    new_img = nib.Nifti1Image(binary_mask, img.affine, img.header.copy())
 
                     # Save as segmentation.nii.gz in same directory
                     nib.save(new_img, out_path)
@@ -1187,7 +1187,7 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
     
     convert_tumor_mask_kirc_usc(dst_root)
 
-    #? uncomment if I can match cases to original TCGA metadata
+    #? uncomment if I can match series to original TCGA metadata
     # if imaging_metadata_csv:
     #     if isinstance(imaging_metadata_csv, str):
     #         if not os.path.exists(imaging_metadata_csv):
@@ -1204,7 +1204,7 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
     # else:  # creates it new
     #     imaging_metadata_df = pd.DataFrame(rows)
     
-    imaging_metadata_df = pd.DataFrame(rows)  #? erase if I can match cases to original TCGA metadata
+    imaging_metadata_df = pd.DataFrame(rows)  #? erase if I can match series to original TCGA metadata
 
     if "patient_id" not in imaging_metadata_df.columns:
         imaging_metadata_df.insert(1, "patient_id", imaging_metadata_df["series_id"])  # copy series_id
@@ -1238,11 +1238,11 @@ def fill_hole_and_morphological_close(left_nii, fill_holes=True, morphological_c
             left_mask[:, :, z] = ndi.binary_closing(left_mask[:, :, z], structure=np.ones((3,3)))
 
     left_mask = left_mask.astype(np.uint8)
-    left_nii = nib.Nifti1Image(left_mask, affine=left_nii.affine, header=left_nii.header)
+    left_nii = nib.Nifti1Image(left_mask, affine=left_nii.affine, header=left_nii.header.copy())
     return left_nii
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
-def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, metadata_csv_out=None, remove_small_blobs=True, fill_holes=True, morphological_closing=True, image_filename="0502_VENOUS.nii", tumor_mask_filename="segmentation_tumor.nii.gz", combined_organ_mask_filename="segmentation_organs_combined.nii.gz", mask_filename_out="segmentation.nii.gz", overwrite=False, visualize=True, orient=True):
+def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, metadata_csv_out=None, remove_small_blobs=True, fill_holes=True, morphological_closing=True, image_filename="0502_VENOUS.nii", tumor_mask_filename="segmentation_tumor.nii.gz", combined_organ_mask_filename="segmentation_organs_combined.nii.gz", mask_filename_out="segmentation.nii.gz", task="total", overwrite=False, visualize=True, orient=True):
     if selected_segmentations is None or len(selected_segmentations) == 0:
         raise ValueError("selected_segmentations must be a non-empty list of segmentation names to include in the combined mask.")
 
@@ -1254,7 +1254,7 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
         else:
             raise ValueError(f"Expected a file path or DataFrame for metadata_csv, got {type(metadata_csv)}")
         if "Modality" not in metadata_df.columns:
-            logger.warning(f"Metadata CSV {metadata_csv} does not contain 'Modality' column. Assuming all cases are CT.")
+            logger.warning(f"Metadata CSV {metadata_csv} does not contain 'Modality' column. Assuming all series are CT.")
     else:
         metadata_df = None
 
@@ -1269,6 +1269,7 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
     # iterate through subdirs of nifti_dir
     case_id_to_organ_overlap = {}
     for series_id in sorted(os.listdir(nifti_dir)):
+        print(series_id)
         nifti_case_dir = os.path.join(nifti_dir, series_id)
         if not os.path.isdir(nifti_case_dir):
             continue
@@ -1277,8 +1278,12 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
             logger.warning(f"NIfTI directory not found for series_id {series_id} at {nifti_case_dir}")
             continue
 
+        if task is None:
+            task = "total"
+        
         modality = "CT"
         if metadata_df is not None:
+            print(series_id)
             row = metadata_df[metadata_df['series_id'] == series_id]
             if not row.empty:
                 modality = row['Modality'].values[0]
@@ -1287,8 +1292,11 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
         image_file = os.path.join(nifti_case_dir, image_filename)
         totalsegmentator_dir = os.path.join(nifti_case_dir, "totalsegmentator")
         totalsegmentator_command = ["TotalSegmentator", "-i", image_file, "-o", totalsegmentator_dir]
-        if modality == "MRI":
+        if modality == "MRI" and task == "total":
             totalsegmentator_command += ["--task", "total_mr"]
+        else:
+            totalsegmentator_command += ["--task", task]
+        
         if remove_small_blobs:
             totalsegmentator_command += ["--remove_small_blobs"]
         
@@ -1331,7 +1339,7 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
 
             # Save
             selected_nii = niis[selected_segmentations[0]]  # use the first selected segmentation as reference for affine/header
-            union_nii = nib.Nifti1Image(union, selected_nii.affine, selected_nii.header)
+            union_nii = nib.Nifti1Image(union, selected_nii.affine, selected_nii.header.copy())
 
             # # orient - already done automatically
             # if orient:
@@ -1365,7 +1373,7 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
                         # union_data = union_nii.get_fdata()
                         # union_reoriented = nib.orientations.apply_orientation(union_data, transform)
                         # new_affine = union_nii.affine @ nib.orientations.inv_ornt_aff(transform, union_nii.shape)
-                        # union_nii = nib.Nifti1Image(union_reoriented, new_affine, union_nii.header)
+                        # union_nii = nib.Nifti1Image(union_reoriented, new_affine, union_nii.header.copy())
                         # for seg_name, seg_nii in niis.items():
                         #     seg_orient = nib.orientations.aff2axcodes(seg_nii.affine)
                         #     if seg_orient != tumor_orient:
@@ -1399,7 +1407,7 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
                 case_id_to_organ_overlap[series_id] = ",".join(overlapping_organs) if overlapping_organs else "none"
 
                 # Save
-                combined_nii = nib.Nifti1Image(combined, tumor_nii.affine, tumor_nii.header)
+                combined_nii = nib.Nifti1Image(combined, tumor_nii.affine, tumor_nii.header.copy())
                 nib.save(combined_nii, combined_organ_tumor_segmentation_file)
 
         #* visualize
@@ -1494,7 +1502,7 @@ def get_number_of_voxels_and_number_of_slices(mask_path):
 def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogenomics_imaging_data.csv", imaging_file_name="imaging.nii.gz", mask_file_name="segmentation.nii.gz", metadata_df=None, metadata_df_columns_to_merge=None, series_description_keywords_exclude="default", overwrite=False):
     """
     Expected structure of raw_image_data_dir:
-    raw_image_data_dir/CASE_ID/
+    raw_image_data_dir/SERIES_ID/
         {imaging_file_name}
         {mask_file_name}
     metadata_df: optional DataFrame with metadata to merge (must contain 'series_id' column)
@@ -1532,7 +1540,7 @@ def prepare_csv_for_pyradiomics(raw_image_data_dir, output_csv_path = "radiogeno
         })
     
     if len(input_data) == 0:
-        raise ValueError(f"No valid cases found in {raw_image_data_dir} with required files: {', '.join(required_files)}")
+        raise ValueError(f"No valid series found in {raw_image_data_dir} with required files: {', '.join(required_files)}")
     
     input_df = pd.DataFrame(input_data)
     
@@ -1665,7 +1673,7 @@ def load_nifti_file(nifti_file):
     else:
         raise ValueError("nifti_file must be a file path or a Nifti1Image object")
 
-def crop_to_nonzero(masked_image_nii, pad=5):
+def crop_to_nonempty(masked_image_nii, threshold=0, pad=5):
     """
     Crop a NIfTI image to the bounding box of nonzero voxels.
     Works for both 2D and 3D images.
@@ -1685,13 +1693,14 @@ def crop_to_nonzero(masked_image_nii, pad=5):
     data = masked_image_nii.get_fdata()
     affine = masked_image_nii.affine
 
-    nonzero = np.argwhere(data != 0)
+    # foreground detection
+    nonempty = np.argwhere(data > threshold)
 
-    if nonzero.size == 0:
-        raise ValueError("Image contains only zeros.")
+    if nonempty.size == 0:
+        raise ValueError(f"No voxels above threshold {threshold}")
 
-    mins = nonzero.min(axis=0)
-    maxs = nonzero.max(axis=0) + 1
+    mins = nonempty.min(axis=0)
+    maxs = nonempty.max(axis=0) + 1
 
     shape = np.array(data.shape)
 
@@ -1708,7 +1717,7 @@ def crop_to_nonzero(masked_image_nii, pad=5):
     shift = affine[:3, :3] @ mins[:3] if data.ndim >= 3 else affine[:2, :2] @ mins[:2]
     new_affine[:len(shift), 3] = affine[:len(shift), :len(shift)] @ mins[:len(shift)] + affine[:len(shift), 3]
 
-    cropped_nii = nib.Nifti1Image(cropped, new_affine, masked_image_nii.header)
+    cropped_nii = nib.Nifti1Image(cropped, new_affine, masked_image_nii.header.copy())
 
     bbox = tuple(v for pair in zip(mins, maxs) for v in pair)
 
@@ -1746,10 +1755,10 @@ def crop_with_bbox(nii, bbox):
     shift = affine[:len(mins), :len(mins)] @ mins + affine[:len(mins), 3]
     new_affine[:len(mins), 3] = shift
 
-    return nib.Nifti1Image(cropped, new_affine, nii.header)
+    return nib.Nifti1Image(cropped, new_affine, nii.header.copy())
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
-def apply_mask(image_file, mask_file, label=None, crop=True, pad_after_crop=5, out_image=True, out_mask=True):
+def apply_mask(image_file, mask_file, label=None, crop=True, min_value=None, pad_after_crop=5, out_image=True, out_mask=True):
     image_nii = load_nifti_file(image_file)
     mask_nii = load_nifti_file(mask_file)
 
@@ -1759,20 +1768,23 @@ def apply_mask(image_file, mask_file, label=None, crop=True, pad_after_crop=5, o
     if image_data.shape != mask_data.shape:
         raise ValueError(f"Image and mask shapes do not match: {image_data.shape} vs {mask_data.shape}")
 
+    if min_value is None:
+        min_value = image_data.min()  # default to minimum value in the image if not provided
+
     if label is None:
-        masked_image_data = image_data * (mask_data > 0)
+        masked_image_data = np.where(mask_data > 0, image_data, min_value)
     else:
         if isinstance(label, int) or isinstance(label, float):
-            masked_image_data = image_data * (mask_data == label)
+            masked_image_data = np.where(mask_data == label, image_data, min_value)
         elif isinstance(label, list):
-            masked_image_data = image_data * np.isin(mask_data, label)
+            masked_image_data = np.where(np.isin(mask_data, label), image_data, min_value)
         else:
-            raise ValueError(f"label must be an int, float, or list of ints/floats. Got {type(label)}")
+            raise ValueError(f"label must be an int, float, list of ints/floats, or None. Got {type(label)}")
 
-    masked_image_nii = nib.Nifti1Image(masked_image_data, affine=image_nii.affine, header=image_nii.header)
+    masked_image_nii = nib.Nifti1Image(masked_image_data, affine=image_nii.affine, header=image_nii.header.copy())
 
     if crop:
-        masked_image_nii, bbox = crop_to_nonzero(masked_image_nii, pad=pad_after_crop)
+        masked_image_nii, bbox = crop_to_nonempty(masked_image_nii, pad=pad_after_crop)
         mask_nii = crop_with_bbox(mask_nii, bbox)
 
     if out_image is True:
@@ -1797,7 +1809,7 @@ def apply_mask(image_file, mask_file, label=None, crop=True, pad_after_crop=5, o
 def compute_shape_histogram(nifti_dir, image_filename):
     x_extents, y_extents, z_extents = [], [], []
 
-    # -------- First Pass: compute tumor z-extent for all cases --------
+    # -------- First Pass: compute tumor z-extent for all series --------
     for series_id in sorted(os.listdir(nifti_dir)):
         case_dir = os.path.join(nifti_dir, series_id)
         image_path = os.path.join(case_dir, image_filename)
@@ -1899,7 +1911,7 @@ def choose_slice_with_most_mask_single_image(image_path, mask_path, mask_value=2
     return out_img_path, out_mask_path, slice_info
     
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
-def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, out=True, overwrite=False):
+def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, min_value=None, out=True, overwrite=False):
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_sized")
 
@@ -1913,6 +1925,9 @@ def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, out=True, overwrit
     current_shape = img.shape
     ndim = img.ndim
 
+    if min_value is None:
+        min_value = img.min()  # default to minimum value in the image if not provided
+
     # determine target shape
     dims = [xdim, ydim, zdim]
     target_shape = tuple(
@@ -1920,7 +1935,7 @@ def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, out=True, overwrit
         for i in range(ndim)
     )
 
-    new_img = np.zeros(target_shape, dtype=img.dtype)
+    new_img = np.full(target_shape, min_value, dtype=img.dtype)
 
     src_slices = []
     dst_slices = []
@@ -1947,7 +1962,19 @@ def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, out=True, overwrit
 
     new_img[tuple(dst_slices)] = img[tuple(src_slices)]
 
-    new_nii = nib.Nifti1Image(new_img, nii.affine, nii.header)
+    crop_offset = np.array([s.start for s in src_slices])
+    new_affine = nii.affine.copy()
+
+    if ndim >= 3:
+        R = new_affine[:3, :3]
+        t = new_affine[:3, 3]
+        new_affine[:3, 3] = R @ crop_offset[:3] + t
+    else:
+        R = new_affine[:2, :2]
+        t = new_affine[:2, 3]
+        new_affine[:2, 3] = R @ crop_offset[:2] + t
+
+    new_nii = nib.Nifti1Image(new_img, new_affine, nii.header.copy())
     if out is None:
         return new_nii
 
@@ -2396,7 +2423,7 @@ def add_acquisition_time(metadata_df, dcm_dir):
     series_to_folder = make_series_to_folder_mapping(dcm_dir)
 
     acquisition_times = []
-    for _, row in tqdm(metadata_df.iterrows(), total=len(metadata_df), desc="Processing cases"):
+    for _, row in tqdm(metadata_df.iterrows(), total=len(metadata_df), desc="Processing series"):
         case_id = row["series_id"]
         series_uid = row["Series UID"]
 
@@ -2523,14 +2550,14 @@ def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_max
         is_4d_df = pd.DataFrame(list(is_4d.items()), columns=["series_id", "is_4d"])
         metadata_df = metadata_df.merge(is_4d_df, on="series_id", how="left")
         if filter_from_metadata:
-            metadata_df = metadata_df[~metadata_df["is_4d"]].copy()  # filter out 4D cases from metadata if they were deleted from dataset
+            metadata_df = metadata_df[~metadata_df["is_4d"]].copy()  # filter out 4D series from metadata if they were deleted from dataset
     if max_zoom_maximum is not None:
         if "max_zoom" in metadata_df.columns:
             metadata_df.drop(columns=["max_zoom"], inplace=True)
         max_zooms_df = pd.DataFrame(list(max_zooms.items()), columns=["series_id", "max_zoom"])
         metadata_df = metadata_df.merge(max_zooms_df, on="series_id", how="left")
         if filter_from_metadata:
-            metadata_df = metadata_df[metadata_df["max_zoom"] <= max_zoom_maximum].copy()  # filter out cases with zoom values exceeding the maximum threshold from metadata if they were deleted from dataset
+            metadata_df = metadata_df[metadata_df["max_zoom"] <= max_zoom_maximum].copy()  # filter out series with zoom values exceeding the maximum threshold from metadata if they were deleted from dataset
     return metadata_df
 
 
