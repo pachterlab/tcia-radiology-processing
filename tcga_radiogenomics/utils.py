@@ -216,6 +216,9 @@ def mask_dcm_to_nii(image_dcm_dir, seg_file, image_nifti_file = None, seg_dir_ou
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def set_canonical_orientation(image_path, out=True, overwrite=False):
+    if image_path is None:
+        return None
+
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_oriented")
 
@@ -245,6 +248,9 @@ def set_canonical_orientation(image_path, out=True, overwrite=False):
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def resample_image(image_path, target_spacing=(0.8, 0.8, 3.0), is_label=False, out=True, overwrite=False):
+    if image_path is None:
+        return None
+
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_resampled")
 
@@ -305,6 +311,9 @@ def resample_image(image_path, target_spacing=(0.8, 0.8, 3.0), is_label=False, o
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def clip_intensity_range(image_path, clip_min=-200, clip_max=300, out=True, overwrite=False):
+    if image_path is None:
+        return None
+
     if out is True:
         out = define_default_out_nifti(image_path, suffix="_clipped")
 
@@ -316,6 +325,9 @@ def clip_intensity_range(image_path, clip_min=-200, clip_max=300, out=True, over
         img_sitk = sitk.ReadImage(image_path)
     elif isinstance(image_path, sitk.Image):
         img_sitk = image_path
+    elif isinstance(image_path, np.ndarray):
+        assert out is None, "Cannot return clipped array if out file path is provided"
+        return np.clip(image_path, clip_min, clip_max)
     else:
         raise ValueError(f"Expected a sitk.Image or file path, got {type(image_path)}")
 
@@ -1673,27 +1685,38 @@ def load_nifti_file(nifti_file):
     else:
         raise ValueError("nifti_file must be a file path or a Nifti1Image object")
 
-def crop_to_nonempty(masked_image_nii, threshold=0, pad=5):
+def crop_to_nonempty(image, threshold=None, pad=5):
     """
-    Crop a NIfTI image to the bounding box of nonzero voxels.
-    Works for both 2D and 3D images.
+    Crop an image to the bounding box of voxels > threshold.
+    Works with nib.Nifti1Image or numpy arrays.
 
     Parameters
     ----------
-    masked_image_nii : nib.Nifti1Image
+    image : nib.Nifti1Image or np.ndarray
+    threshold : float
     pad : int
 
     Returns
     -------
-    cropped_nii : nib.Nifti1Image
+    cropped_image : same type as input
     bbox : tuple
-        bounding box as (min0, max0, min1, max1, ...)
+        (min0, max0, min1, max1, ...)
     """
 
-    data = masked_image_nii.get_fdata()
-    affine = masked_image_nii.affine
+    if isinstance(image, nib.Nifti1Image):
+        data = image.get_fdata()
+        affine = image.affine
+        header = image.header.copy()
+        return_nifti = True
+    elif isinstance(image, np.ndarray):
+        data = image
+        return_nifti = False
+    else:
+        raise ValueError(f"Expected nib.Nifti1Image or np.ndarray, got {type(image)}")
 
     # foreground detection
+    if threshold is None:  # get min value and add small epsilon to avoid numerical issues with exact zeros
+        threshold = data.min() + 1e-5
     nonempty = np.argwhere(data > threshold)
 
     if nonempty.size == 0:
@@ -1708,18 +1731,21 @@ def crop_to_nonempty(masked_image_nii, threshold=0, pad=5):
         mins = np.maximum(mins - pad, 0)
         maxs = np.minimum(maxs + pad, shape)
 
-    # build slice object dynamically
     slices = tuple(slice(mn, mx) for mn, mx in zip(mins, maxs))
     cropped = data[slices]
 
-    # update affine shift
-    new_affine = affine.copy()
-    shift = affine[:3, :3] @ mins[:3] if data.ndim >= 3 else affine[:2, :2] @ mins[:2]
-    new_affine[:len(shift), 3] = affine[:len(shift), :len(shift)] @ mins[:len(shift)] + affine[:len(shift), 3]
-
-    cropped_nii = nib.Nifti1Image(cropped, new_affine, masked_image_nii.header.copy())
-
     bbox = tuple(v for pair in zip(mins, maxs) for v in pair)
+
+    if not return_nifti:
+        return cropped, bbox
+
+    # update affine
+    new_affine = affine.copy()
+    dims = min(3, data.ndim)
+
+    new_affine[:dims, 3] = affine[:dims, :dims] @ mins[:dims] + affine[:dims, 3]
+
+    cropped_nii = nib.Nifti1Image(cropped, new_affine, header)
 
     return cropped_nii, bbox
 
@@ -1784,7 +1810,7 @@ def apply_mask(image_file, mask_file, label=None, crop=True, min_value=None, pad
     masked_image_nii = nib.Nifti1Image(masked_image_data, affine=image_nii.affine, header=image_nii.header.copy())
 
     if crop:
-        masked_image_nii, bbox = crop_to_nonempty(masked_image_nii, pad=pad_after_crop)
+        masked_image_nii, bbox = crop_to_nonempty(masked_image_nii, threshold=min_value, pad=pad_after_crop)
         mask_nii = crop_with_bbox(mask_nii, bbox)
 
     if out_image is True:
@@ -1800,6 +1826,12 @@ def apply_mask(image_file, mask_file, label=None, crop=True, min_value=None, pad
         nib.save(mask_nii, out_mask)
         logger.info(f"Saved masked mask to {out_mask}")
     
+    # convert False/"" to None for consistent return type
+    if not out_image:
+        out_image = None
+    if not out_mask:
+        out_mask = None
+
     if out_image is None and out_mask is None:
         return masked_image_nii, mask_nii
 
@@ -1912,23 +1944,51 @@ def choose_slice_with_most_mask_single_image(image_path, mask_path, mask_value=2
     
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, min_value=None, out=True, overwrite=False):
-    if out is True:
-        out = define_default_out_nifti(image_path, suffix="_sized")
+    if image_path is None:
+        return None
 
-    if out is not None and os.path.exists(out) and not overwrite:
-        logger.debug(f"Cropped/padded image already exists at {out} and overwrite=False, skipping.")
-        return out
+    # -------------------------
+    # Determine input type
+    # -------------------------
+    if isinstance(image_path, str):
+        if out is True:
+            out = define_default_out_nifti(image_path, suffix="_sized")
 
-    nii = nib.load(image_path)
-    img = nii.get_fdata()
+        if out is not None and os.path.exists(out) and not overwrite:
+            logger.debug(f"Cropped/padded image already exists at {out} and overwrite=False, skipping.")
+            return out
 
+        nii = nib.load(image_path)
+        img = nii.get_fdata()
+        affine = nii.affine
+        header = nii.header.copy()
+        return_nifti = True
+
+    elif isinstance(image_path, nib.Nifti1Image):
+        nii = image_path
+        img = nii.get_fdata()
+        affine = nii.affine
+        header = nii.header.copy()
+        return_nifti = True
+        out = None
+
+    elif isinstance(image_path, np.ndarray):
+        img = image_path
+        return_nifti = False
+        out = None
+
+    else:
+        raise ValueError(f"Unsupported input type: {type(image_path)}")
+
+    # -------------------------
+    # Prepare shapes
+    # -------------------------
     current_shape = img.shape
     ndim = img.ndim
 
     if min_value is None:
-        min_value = img.min()  # default to minimum value in the image if not provided
+        min_value = img.min()
 
-    # determine target shape
     dims = [xdim, ydim, zdim]
     target_shape = tuple(
         dims[i] if dims[i] is not None else current_shape[i]
@@ -1941,17 +2001,16 @@ def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, min_value=None, ou
     dst_slices = []
 
     for i in range(ndim):
+
         src = current_shape[i]
         dst = target_shape[i]
 
         if src >= dst:
-            # crop
             start_src = (src - dst) // 2
             end_src = start_src + dst
             start_dst = 0
             end_dst = dst
         else:
-            # pad
             start_src = 0
             end_src = src
             start_dst = (dst - src) // 2
@@ -1962,8 +2021,17 @@ def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, min_value=None, ou
 
     new_img[tuple(dst_slices)] = img[tuple(src_slices)]
 
+    # -------------------------
+    # Array case (simple)
+    # -------------------------
+    if not return_nifti:
+        return new_img
+
+    # -------------------------
+    # Update affine for NIfTI
+    # -------------------------
     crop_offset = np.array([s.start for s in src_slices])
-    new_affine = nii.affine.copy()
+    new_affine = affine.copy()
 
     if ndim >= 3:
         R = new_affine[:3, :3]
@@ -1974,7 +2042,8 @@ def crop_and_pad(image_path, xdim=None, ydim=None, zdim=None, min_value=None, ou
         t = new_affine[:2, 3]
         new_affine[:2, 3] = R @ crop_offset[:2] + t
 
-    new_nii = nib.Nifti1Image(new_img, new_affine, nii.header.copy())
+    new_nii = nib.Nifti1Image(new_img, new_affine, header)
+
     if out is None:
         return new_nii
 
