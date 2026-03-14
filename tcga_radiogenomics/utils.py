@@ -1117,7 +1117,7 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
     rows = []
     for root, dirs, files in tqdm(os.walk(src_dir), desc="Processing USC TCGA-KIRC data"):
         row_dict = {}
-        seriesid_to_series_id = {}
+        series_uid_to_series_id = {}
         for fname in files:
             if fname in target_files:
                 # full source path
@@ -1126,14 +1126,15 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
                 # series_id = first folder after src_dir
                 rel_path = os.path.relpath(src_path, src_dir)
                 patient_id = rel_path.split(os.sep)[0]
-                series_id = patient_id
                 dcm_zip_path = os.path.join(os.path.dirname(root), "DICOM.zip")
                 dcm = get_seriesid_from_dicom_zip(dcm_zip_path)
-                series_id = dcm.SeriesInstanceUID
+                
+                series_id = patient_id
+                series_uid = dcm.SeriesInstanceUID
                 study_id = dcm.StudyInstanceUID
                 series_description = getattr(dcm, "SeriesDescription", "")
                 modality = dcm.Modality
-                seriesid_to_series_id[series_id] = series_id
+                series_uid_to_series_id[series_uid] = series_id
 
                 # build destination path
                 dst_dir = os.path.join(dst_root, series_id)
@@ -1152,7 +1153,7 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
                     row_dict["Project"] = "tcga-kirc"
                     row_dict["patient_id"] = patient_id
                     row_dict["study_id"] = study_id
-                    row_dict["Series UID"] = series_id
+                    row_dict["Series UID"] = series_uid
                     row_dict["Series Description"] = series_description
                     row_dict["Modality"] = modality  # all are CT
                     row_dict["Number of Images Original"] = nib.load(dst_path).get_fdata().shape[2]  # get number of slices from nifti header
@@ -1209,10 +1210,10 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
     #         imaging_metadata_df = imaging_metadata_csv
     #     else:
     #         raise ValueError(f"Expected a file path or DataFrame for imaging_metadata_csv, got {type(imaging_metadata_csv)}")
-    #     # make imaging_metadata_df["series_id_usc"] by merging key of seriesid_to_series_id with imaging_metadata_df["Series UID"]
+    #     # make imaging_metadata_df["series_id_usc"] by merging key of series_uid_to_series_id with imaging_metadata_df["Series UID"]
     #     if "series_id_usc" in imaging_metadata_df.columns:
     #         imaging_metadata_df.drop(columns=["series_id_usc"], inplace=True)  # drop it
-    #     imaging_metadata_df["series_id_usc"] = imaging_metadata_df["Series UID"].map(seriesid_to_series_id)
+    #     imaging_metadata_df["series_id_usc"] = imaging_metadata_df["Series UID"].map(series_uid_to_series_id)
     # else:  # creates it new
     #     imaging_metadata_df = pd.DataFrame(rows)
     
@@ -1789,7 +1790,7 @@ def apply_mask(image_file, mask_file, label=None, crop=True, min_value=None, pad
     mask_nii = load_nifti_file(mask_file)
 
     image_data = image_nii.get_fdata()
-    mask_data = mask_nii.get_fdata()
+    mask_data = mask_nii.get_fdata().astype(np.int16)
 
     if image_data.shape != mask_data.shape:
         raise ValueError(f"Image and mask shapes do not match: {image_data.shape} vs {mask_data.shape}")
@@ -1876,69 +1877,122 @@ def compute_shape_histogram(nifti_dir, image_filename):
     return extents_95th
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
-def choose_slice_with_most_mask_single_image(image_path, mask_path, mask_value=2, out_image=True, out_mask=True, overwrite=False):
-    if out_image is True:
+def choose_slice_with_most_mask_single_image(image, mask, mask_value=2, out_image=True, out_mask=True, overwrite=False):
+    # --------------------------------------------------
+    # Determine input types
+    # --------------------------------------------------
+    if isinstance(image, str):
+        img_nii = nib.load(image)
+        img = img_nii.get_fdata()
+        affine = img_nii.affine
+        header = img_nii.header
+        image_path = image
+    elif isinstance(image, nib.Nifti1Image):
+        img_nii = image
+        img = img_nii.get_fdata()
+        affine = img_nii.affine
+        header = img_nii.header
+        image_path = None
+    elif isinstance(image, np.ndarray):
+        img = image
+        img_nii = None
+        affine = None
+        header = None
+        image_path = None
+    else:
+        raise ValueError(f"Unsupported image type: {type(image)}")
+
+    if isinstance(mask, str):
+        mask_nii = nib.load(mask)
+        mask_arr = mask_nii.get_fdata()
+        mask_path = mask
+    elif isinstance(mask, nib.Nifti1Image):
+        mask_nii = mask
+        mask_arr = mask_nii.get_fdata()
+        mask_path = None
+    elif isinstance(mask, np.ndarray):
+        mask_arr = mask
+        mask_nii = None
+        mask_path = None
+    else:
+        raise ValueError(f"Unsupported mask type: {type(mask)}")
+
+    # --------------------------------------------------
+    # Output paths (only if input paths exist)
+    # --------------------------------------------------
+    out_img_path = None
+    out_mask_path = None
+
+    if image_path and out_image is True:
         out_img_path = define_default_out_nifti(image_path, suffix="_best_slice")
-    if out_mask is True:
+
+    if mask_path and out_mask is True:
         out_mask_path = define_default_out_nifti(mask_path, suffix="_best_slice")
 
-    if out_img_path is not None and os.path.exists(out_img_path) and out_mask_path is not None and os.path.exists(out_mask_path) and not overwrite:
-        logger.debug(f"Clipped image already exists at {out_img_path} and overwrite=False, skipping clipping.")
+    if (
+        out_img_path
+        and out_mask_path
+        and os.path.exists(out_img_path)
+        and os.path.exists(out_mask_path)
+        and not overwrite
+    ):
+        logger.debug("Best slice already exists, skipping.")
         return out_img_path, out_mask_path, {}
 
-    # Load the image and mask
-    img_nii = nib.load(image_path)
-    mask_nii = nib.load(mask_path)
-
-    img = img_nii.get_fdata()
-    mask = mask_nii.get_fdata()
-
-    # Identify mask voxels (value == mask_value)
-    if isinstance(mask_value, list):
-        selected_mask = np.isin(mask, mask_value)
+    # --------------------------------------------------
+    # Identify mask voxels
+    # --------------------------------------------------
+    if isinstance(mask_value, (list, tuple, set)):
+        selected_mask = np.isin(mask_arr, list(mask_value))
+        mask_value_str = ",".join(map(str, mask_value))
     else:
-        selected_mask = (mask == mask_value)
+        selected_mask = (mask_arr == mask_value)
+        mask_value_str = str(mask_value)
 
+    # --------------------------------------------------
     # Compute mask area per slice
+    # --------------------------------------------------
     mask_area_per_slice = selected_mask.sum(axis=(0, 1))
 
-    # Return None if no mask
     if mask_area_per_slice.max() == 0:
         return None, 0
 
-    # Get slice index with largest mask area
     best_slice_idx = int(np.argmax(mask_area_per_slice))
     tumor_pixels_in_best_slice = int(mask_area_per_slice[best_slice_idx])
 
-    mask_value_str = ",".join(mask_value) if isinstance(mask_value, list) else str(mask_value)
     slice_info = {
         f"slice_with_most_mask_{mask_value_str}": best_slice_idx,
         f"number_of_{mask_value_str}_mask_pixels_in_best_slice": tumor_pixels_in_best_slice,
     }
-    
-    if best_slice_idx is None:
-        logger.warning(f"No mask voxels found in {mask_path}.")
-    
-    # Extract slice
+
+    # --------------------------------------------------
+    # Extract slices
+    # --------------------------------------------------
     img_slice = img[:, :, best_slice_idx]
-    mask_slice = mask[:, :, best_slice_idx]
+    mask_slice = mask_arr[:, :, best_slice_idx]
 
-    # # Expand dims to keep 3D shape (X, Y, 1)
-    # img_slice = img_slice[:, :, np.newaxis]
-    # mask_slice = mask_slice[:, :, np.newaxis]
+    # --------------------------------------------------
+    # If arrays were passed → return arrays
+    # --------------------------------------------------
+    if img_nii is None and mask_nii is None:
+        return img_slice, mask_slice, slice_info
 
-    # Update affine (keep same, but technically 2D slice)
-    new_affine = img_nii.affine.copy()
+    # --------------------------------------------------
+    # Otherwise construct NIfTI outputs
+    # --------------------------------------------------
+    new_affine = affine.copy()
 
-    # Save
-    out_img = nib.Nifti1Image(img_slice, new_affine)
-    out_mask = nib.Nifti1Image(mask_slice, new_affine)
-
-    nib.save(out_img, out_img_path)
-    nib.save(out_mask, out_mask_path)
+    out_img = nib.Nifti1Image(img_slice, new_affine, header)
+    out_mask = nib.Nifti1Image(mask_slice, new_affine, header)
 
     if out_image is None and out_mask is None:
         return out_img, out_mask, slice_info
+
+    if out_img_path:
+        nib.save(out_img, out_img_path)
+
+    if out_mask_path:
+        nib.save(out_mask, out_mask_path)
 
     return out_img_path, out_mask_path, slice_info
     
@@ -2113,8 +2167,8 @@ def check_dataset_intensity_consistency(image_files, mean_tol=100, std_frac_tol=
 
     means = np.array([s["mean"] for s in stats])
     stds  = np.array([s["std"] for s in stats])
-    mins  = np.array([s["min"] for s in stats])
-    maxs  = np.array([s["max"] for s in stats])
+    # mins  = np.array([s["min"] for s in stats])
+    # maxs  = np.array([s["max"] for s in stats])
 
     median_mean = np.median(means)
     median_std  = np.median(stds)
