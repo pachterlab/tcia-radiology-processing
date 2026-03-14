@@ -784,16 +784,32 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
                 os.replace(nii_src, nii_dst)
             elif os.path.exists(os.path.join(case_outdir, f"{series_uid}_i00001.nii.gz")):  # split view ie axial, coronal, sagittal in 3 files - pick axial
                 # loop through niftis in case_outdir
+                nii_backups = []
                 for f in os.listdir(case_outdir):
                     if f.startswith(series_uid) and f.endswith(".nii.gz"):
                         json_path = os.path.join(case_outdir, f[:-7] + ".json")  # replace .nii.gz with .json
                         if os.path.exists(json_path):
                             with open(json_path, "r") as jf:
                                 json_content = json.load(jf)
+                            nii_src = os.path.join(case_outdir, f)
                             if json_content["ImageOrientationPatientDICOM"] == [1, 0, 0, 0, 1, 0]:  # axial
-                                nii_src = os.path.join(case_outdir, f)
                                 os.replace(nii_src, nii_dst)
                                 break
+                            else:
+                                nii_backups.append(nii_src)
+                # backup
+                z_best = 0
+                nii_src = None
+                for nii_path in nii_backups:
+                    nii = nib.load(nii_path)
+                    z_dim = nii.shape[2]
+                    if z_dim > z_best:
+                        z_best = z_dim
+                        nii_src = nii_path
+                if z_best > 5:  # if we found a backup with more than 5 slices, use it
+                    logger.warning(f"Using backup nifti {nii_src} with {z_best} slices for {case_id} since original split view files did not have axial orientation")
+                    os.replace(nii_src, nii_dst)
+
             elif os.path.exists(os.path.join(case_outdir, f"{series_uid}_e1.nii.gz")):  # identical copies, but displayed window settings differ (but the voxel data is the same) - just pick one
                 os.replace(os.path.join(case_outdir, f"{series_uid}_e1.nii.gz"), nii_dst)
             elif len([f for f in os.listdir(case_outdir) if f.endswith(".nii.gz")]) == 1:  # a single nifti with a suffix - might be poor quality; but if not, then just rename
@@ -2642,12 +2658,13 @@ def update_phase_column_with_acquisition_time(metadata_df, dcm_dir=None):
     return metadata_df
 
 def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_maximum=20, filter_from_metadata=True, image_filename="imaging.nii.gz"):
-    is_4d, max_zooms = {}, {}
+    is_4d, max_zooms, is_missing = {}, {}, {}
     for case_id in metadata_df["series_id"].unique():
         case_dir = os.path.join(nifti_dir, case_id)
         nifti_path = os.path.join(case_dir, image_filename)
         if not os.path.exists(nifti_path):
             is_4d[case_id] = False
+            is_missing[case_id] = True
             continue
         img_nii = nib.load(nifti_path)
         img = img_nii.get_fdata()
@@ -2667,6 +2684,13 @@ def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_max
                     shutil.rmtree(case_dir, ignore_errors=True)
     
     # merge is_4d info back to metadata_df by series_id
+    if is_missing:
+        if "is_missing" in metadata_df.columns:
+            metadata_df.drop(columns=["is_missing"], inplace=True)
+        is_missing_df = pd.DataFrame(list(is_missing.items()), columns=["series_id", "is_missing"])
+        metadata_df = metadata_df.merge(is_missing_df, on="series_id", how="left")
+        if filter_from_metadata:
+            metadata_df = metadata_df[~metadata_df["is_missing"]].copy()  # filter out missing series from metadata if they were deleted from dataset
     if is_4d:
         if "is_4d" in metadata_df.columns:
             metadata_df.drop(columns=["is_4d"], inplace=True)
