@@ -1801,7 +1801,16 @@ def crop_with_bbox(nii, bbox):
     return nib.Nifti1Image(cropped, new_affine, nii.header.copy())
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
-def apply_mask(image_file, mask_file, label=None, crop=True, min_value=None, pad_after_crop=5, out_image=True, out_mask=True):
+def apply_mask(image_file, mask_file, label=None, crop=True, min_value=None, pad_after_crop=5, out_image=True, out_mask=True, overwrite=False):
+    if out_image is True:
+        out_image = define_default_out_nifti(image_file, suffix="_masked")
+    if out_mask is True:
+        out_mask = define_default_out_nifti(mask_file, suffix="_masked")
+    
+    if out_image is not None and os.path.exists(out_image) and out_mask is not None and os.path.exists(out_mask) and not overwrite:
+        logger.debug(f"Masked image and mask already exist at {out_image} and {out_mask}. Skipping masking.")
+        return out_image, out_mask
+    
     image_nii = load_nifti_file(image_file)
     mask_nii = load_nifti_file(mask_file)
 
@@ -1829,11 +1838,6 @@ def apply_mask(image_file, mask_file, label=None, crop=True, min_value=None, pad
     if crop:
         masked_image_nii, bbox = crop_to_nonempty(masked_image_nii, threshold=min_value, pad=pad_after_crop)
         mask_nii = crop_with_bbox(mask_nii, bbox)
-
-    if out_image is True:
-        out_image = define_default_out_nifti(image_file, suffix="_masked")
-    if out_mask is True:
-        out_mask = define_default_out_nifti(mask_file, suffix="_masked")
     
     if out_image:
         nib.save(masked_image_nii, out_image)
@@ -2849,7 +2853,7 @@ def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overla
         plt.show()
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
-def nii_to_npy(nifti_file, out=True):
+def nii_to_npy(nifti_file, out=True, overwrite=False):
     if not isinstance(nifti_file, str):
         raise ValueError(f"Expected a file path for nifti_file, got {type(nifti_file)}")
     if not os.path.exists(nifti_file):
@@ -2863,7 +2867,7 @@ def nii_to_npy(nifti_file, out=True):
         else:
             out = nifti_file + ".npy"
     
-    if out is not None and os.path.exists(out):
+    if out is not None and os.path.exists(out) and not overwrite:
         return out
     
     nii = nib.load(nifti_file)
