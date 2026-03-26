@@ -1,4 +1,4 @@
-name: tcga_radiogenomics
+name: tcia_radiology_processing
 channels:
   - bioconda
   - pytorch

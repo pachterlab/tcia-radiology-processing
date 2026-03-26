@@ -3,7 +3,7 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tcga_radiogenomics"
+name = "tcia_radiology_processing"
 version = "0.1.0"
 description = "TCGA Radiogenomics."
 readme = {file = "README.md", content-type = "text/markdown"}
@@ -51,7 +51,7 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/pachterlab/tcga-radiogenomics"
+"Homepage" = "https://github.com/pachterlab/tcia-radiology-processing"
 
 [tool.setuptools.packages.find]
 where = ["."]
