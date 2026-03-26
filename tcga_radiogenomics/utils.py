@@ -2736,13 +2736,14 @@ def check_few_slices(metadata_df, nifti_dir, image_filename="imaging.nii.gz"):
     return metadata_df
 
 
-def view_dicom_file(dicom_file, title="default", vmin=-200, vmax=300, out_path=None):
+def view_dicom_file(dicom_file, title="default", vmin=-200, vmax=300, show_colorbar=True, out_path=None):
     print(f"Viewing DICOM file: {dicom_file}")
     if not dicom_file.lower().endswith(".dcm"):
         print(f"Warning: {dicom_file} does not have a .dcm extension, but will attempt to read as DICOM.")
     dcm = pydicom.dcmread(dicom_file)
     plt.imshow(dcm.pixel_array, cmap="gray", vmin=vmin, vmax=vmax)
-    plt.colorbar()
+    if show_colorbar:
+        plt.colorbar()
     if title == "default":
         title = f'DICOM {os.path.basename(dicom_file).split(".")[0]}'
     if title:
@@ -2777,23 +2778,29 @@ def view_dicom_directory(dicom_dir, vmin=None, vmax=None):
             plt.show()
         interact(show_slice, i=(0, volume.shape[0]-1));
 
-def view_dicom(dicom_path, vmin=None, vmax=None, title="default", out_path=None):
+def view_dicom(dicom_path, vmin=None, vmax=None, title="default", show_colorbar=True, out_path=None):
     logger.info(f"Viewing DICOM path: {dicom_path}")
     if os.path.isfile(dicom_path):
-        view_dicom_file(dicom_path, title=title, vmin=vmin, vmax=vmax, out_path=out_path)
+        view_dicom_file(dicom_path, title=title, vmin=vmin, vmax=vmax, show_colorbar=show_colorbar, out_path=out_path)
     elif os.path.isdir(dicom_path):
         view_dicom_directory(dicom_path, vmin=vmin, vmax=vmax)
     else:
         raise ValueError(f"Path {dicom_path} is neither a file nor a directory.")
 
-def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overlay_mask=None, out_path=None, _out_dir=None):
-    if not os.path.exists(nifti_file):
-        print(f"NIfTI file not found: {nifti_file}")
-        return
+def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overlay_mask=None, show_colorbar=True, out_path=None, _out_dir=None):
+    if isinstance(nifti_file, str):
+        if not os.path.exists(nifti_file):
+            print(f"NIfTI file not found: {nifti_file}")
+            return
 
-    logger.info(f"Viewing NIfTI file: {nifti_file}")
-    
-    nii = nib.load(nifti_file)
+        logger.info(f"Viewing NIfTI file: {nifti_file}")
+        
+        nii = nib.load(nifti_file)
+    elif isinstance(nifti_file, nib.Nifti1Image):
+        nii = nifti_file
+    else:
+        raise ValueError(f"Expected nifti_file to be a file path or Nifti1Image object, got {type(nifti_file)}")
+
     volume = nii.get_fdata()
 
     # If 2D, make it behave like a single-slice 3D volume
@@ -2832,7 +2839,8 @@ def view_nifti(nifti_file, z=None, title="default", vmin=None, vmax=None, overla
             raise ValueError(f"z must be between 0 and {nz-1}")
 
         plt.imshow(volume[:, :, z], cmap="gray", vmin=vmin, vmax=vmax)
-        plt.colorbar()
+        if show_colorbar:
+            plt.colorbar()
         if overlay_mask is not None:
             plt.imshow(mask[:, :, z], cmap=cmap, alpha=0.3)
         if title == "default":
@@ -2878,4 +2886,46 @@ def nii_to_npy(nifti_file, out=True, overwrite=False):
 
     np.save(out, volume)
     logger.info(f"Saved NumPy volume to {out}")
+    return out
+
+
+def generate_all_orientations(img):
+    if isinstance(img, str):
+        if not os.path.exists(img):
+            raise FileNotFoundError(f"NIfTI file not found: {img}")
+        img = nib.load(img)
+    elif not isinstance(img, nib.Nifti1Image):
+        raise ValueError(f"Expected img to be a file path or Nifti1Image object, got {type(img)}")
+
+    data = img.get_fdata()
+    affine = img.affine
+
+    current_axcodes = nib.orientations.aff2axcodes(affine)
+    current_ornt = nib.orientations.axcodes2ornt(current_axcodes)
+
+    orientations = [
+        ('R','A','S'),
+        ('L','A','S'),
+        ('R','P','S'),
+        ('L','P','S'),
+        ('R','A','I'),
+        ('L','A','I'),
+        ('R','P','I'),
+        ('L','P','I'),
+    ]
+
+    out = {}
+
+    for target_axcodes in orientations:
+        target_ornt = nib.orientations.axcodes2ornt(target_axcodes)
+        transform = nib.orientations.ornt_transform(current_ornt, target_ornt)
+
+        new_data = nib.orientations.apply_orientation(data, transform)
+
+        # ✅ fix affine properly
+        new_affine = affine @ nib.orientations.inv_ornt_aff(transform, data.shape)
+
+        new_img = nib.Nifti1Image(new_data, new_affine)
+        out["".join(target_axcodes)] = new_img
+
     return out

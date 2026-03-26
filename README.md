@@ -2,7 +2,7 @@
 
 Radiology image processing of TCGA/TCIA data.
 
-![alt text](https://github.com/pachterlab/cellsweep/blob/main/figures/fig1.png?raw=true)
+![alt text](https://github.com/pachterlab/cellsweep/blob/main/figures/Fig1.png?raw=true)
 
 ## Getting Started
 
