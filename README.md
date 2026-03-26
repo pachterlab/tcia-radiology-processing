@@ -1,4 +1,4 @@
-# TCGA Radiogenomics Processing Protocol
+# TCIA Radiogenomics Processing Protocol
 
 Radiology image processing of TCGA/TCIA data.
 
