@@ -1127,6 +1127,9 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
     target_files = {"0502_VENOUS.nii": "Image", "ROI_602_Tumor_a.nii": "Mask"}
     target_file_types = {v: k for k, v in target_files.items()}
 
+    project = "tcga"
+    subproject = "tcga-kirc"
+
     if not os.path.exists(src_dir):
         raise FileNotFoundError(f"Source directory {src_dir} does not exist. Please check the path to the USC-segmented TCGA-KIRC data.")
 
@@ -1166,8 +1169,9 @@ def download_usc_tcga_kirc_data(usc_tcga_kirc_data_dir, imaging_metadata_csv=Non
 
                 if len(row_dict) == 0:  # only add metadata once per series
                     row_dict["series_id"] = series_id
-                    row_dict["Project"] = "tcga-kirc"
-                    row_dict["patient_id"] = patient_id
+                    row_dict["project"] = project
+                    row_dict["subproject"] = subproject
+                    row_dict["patient_id"] = patient_id  # f"{project}_{patient_id}"
                     row_dict["study_id"] = study_id
                     row_dict["Series UID"] = series_uid
                     row_dict["Series Description"] = series_description
@@ -1959,6 +1963,37 @@ def choose_slice_with_most_mask_single_image(image, mask, mask_value=2, out_imag
         logger.debug("Best slice already exists, skipping.")
         return out_img_path, out_mask_path, {}
 
+    # sanity check for matching shapes
+    if img.shape != mask_arr.shape:
+        raise ValueError(f"Image and mask shapes do not match: {img.shape} vs {mask_arr.shape}")
+
+    # check if mask_value exists in mask
+    if (isinstance(mask_value, (list, tuple, set)) and not np.isin(mask_value, mask_arr).any()) or (not isinstance(mask_value, (list, tuple, set)) and mask_value not in mask_arr):
+            logger.warning(f"None of the specified mask values {mask_value} found in mask. Returning None.")
+            return None, 0, {}
+
+    # check if image only has one slice (2D image)
+    if img.ndim == 2 or (img.ndim == 3 and img.shape[2] == 1):
+        logger.info("Image has only one slice. Returning original image and mask.")
+        slice_info = {
+            f"slice_with_most_mask_{mask_value}": 0,
+            f"number_of_{mask_value}_mask_pixels_in_best_slice": int(np.sum(mask_arr == mask_value)),
+        }
+        if out_image is None and out_mask is None:
+            return img, mask_arr, slice_info
+
+        if out_image and not os.path.exists(out_img_path):
+            nib.save(nib.Nifti1Image(img, affine, header), out_img_path)
+            logger.info(f"Saved best slice image to {out_img_path}")
+
+        if out_mask and not os.path.exists(out_mask_path):
+            nib.save(nib.Nifti1Image(mask_arr, affine, header), out_mask_path)
+            logger.info(f"Saved best slice mask to {out_mask_path}")
+
+        return out_img_path, out_mask_path, slice_info
+    
+
+    
     # --------------------------------------------------
     # Identify mask voxels
     # --------------------------------------------------
