@@ -837,62 +837,63 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
         # Segmentation conversion
         # -------------------
         if segmentation_dcm_dir is not None and segmentation_metadata_df is not None:
-            seg_match = segmentation_metadata_df[segmentation_metadata_df["series_id"] == case_id]
-
-            if len(seg_match) == 0:
-                logger.info(f"no segmentation metadata found for {case_id}")
-                continue
-            
-            patient_id = seg_match["PatientID"].values[0]
-            study_date = int(seg_match["StudyDate"].values[0])
-            date_suffix = int(seg_match["StudyDate_suffix"].values[0])
-
-            seg_filename = f"{patient_id}_{study_date}_{date_suffix}.seg.dcm"
-            seg_dcm = os.path.join(segmentation_dcm_dir, "ai-segmentations-dcm", f"ai_{seg_filename}")
-
-            # use quality-adjusted segmentation if available, otherwise fallback to original (AI-generated)
-            for qa_prefixes in ["rad1", "ne1"]:
-                seg_dcm_qa = os.path.join(segmentation_dcm_dir, "qa-segmentations-dcm", f"{qa_prefixes}_{seg_filename}")
-                if os.path.exists(seg_dcm_qa):
-                    seg_dcm = seg_dcm_qa
-                    break
-
-            # Load segmentation
-            seg_ds = pydicom.dcmread(seg_dcm)
-            masks_existed_before = True
-            for seg_type in seg_ds.SegmentSequence:
-                seg_number = seg_type.SegmentNumber
-                seg_label = seg_type.SegmentLabel
-
-                seg_out_tmp = os.path.join(case_outdir, f"{seg_number}.nii.gz")
-                if not os.path.exists(seg_out_tmp):
-                    masks_existed_before = False
-                    if os.path.exists(seg_dcm):
-                        logger.info(f"Converting segmentation for {case_id} from {seg_dcm} to {seg_out_tmp}")
-                        segimage2itkimage_cmd = [
-                            "segimage2itkimage",
-                            "--inputDICOM", seg_dcm,
-                            "--outputDirectory", case_outdir,
-                            "-t", "nii",
-                        ]
-                        if segimage2itkimage_conda:
-                            conda_prefix = os.environ.get("CONDA_PREFIX")
-                            os.environ["LD_LIBRARY_PATH"] = f"{conda_prefix}/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
-                            segimage2itkimage_cmd[0] = os.path.join(conda_prefix, "bin", "segimage2itkimage")
-                        subprocess.run(segimage2itkimage_cmd, check=True)
-                        # pad_mask_to_image(seg_out_tmp, nii_dst, seg_out_tmp)  # ensure mask matches image geometry
-                        # mask_dcm_to_nii(image_dcm_dir=dicom_folder, seg_file=seg_dcm, image_nifti_file=nii_dst, seg_dir_out=case_outdir, logger=logger)  # my manual function
-                    else:
-                        logger.warning(f"Segmentation DICOM {seg_filename} not found for {case_id}")
-                        continue
-                if not masks_existed_before:
-                    pad_mask_to_image(seg_out_tmp, nii_dst, seg_out_tmp)  # ensure mask matches image geometry
-            
             combined_seg_path = os.path.join(case_outdir, "segmentation.nii.gz")
-            if not os.path.exists(combined_seg_path) or not masks_existed_before:
-                combine_masks(case_outdir, combined_seg_path=combined_seg_path, include_cyst=False)
-            
-            logger.info(f"Segmentation conversion completed for {case_id}")
+            if not os.path.exists(combined_seg_path):
+                seg_match = segmentation_metadata_df[segmentation_metadata_df["series_id"] == case_id]
+
+                if len(seg_match) == 0:
+                    logger.info(f"no segmentation metadata found for {case_id}")
+                    continue
+                
+                patient_id = seg_match["PatientID"].values[0]
+                study_date = int(seg_match["StudyDate"].values[0])
+                date_suffix = int(seg_match["StudyDate_suffix"].values[0])
+
+                seg_filename = f"{patient_id}_{study_date}_{date_suffix}.seg.dcm"
+                seg_dcm = os.path.join(segmentation_dcm_dir, "ai-segmentations-dcm", f"ai_{seg_filename}")
+
+                # use quality-adjusted segmentation if available, otherwise fallback to original (AI-generated)
+                for qa_prefixes in ["rad1", "ne1"]:
+                    seg_dcm_qa = os.path.join(segmentation_dcm_dir, "qa-segmentations-dcm", f"{qa_prefixes}_{seg_filename}")
+                    if os.path.exists(seg_dcm_qa):
+                        seg_dcm = seg_dcm_qa
+                        break
+
+                # Load segmentation
+                seg_ds = pydicom.dcmread(seg_dcm)
+                masks_existed_before = True
+                for seg_type in seg_ds.SegmentSequence:
+                    seg_number = seg_type.SegmentNumber
+                    seg_label = seg_type.SegmentLabel
+
+                    seg_out_tmp = os.path.join(case_outdir, f"{seg_number}.nii.gz")
+                    if not os.path.exists(seg_out_tmp):
+                        masks_existed_before = False
+                        if os.path.exists(seg_dcm):
+                            logger.info(f"Converting segmentation for {case_id} from {seg_dcm} to {seg_out_tmp}")
+                            segimage2itkimage_cmd = [
+                                "segimage2itkimage",
+                                "--inputDICOM", seg_dcm,
+                                "--outputDirectory", case_outdir,
+                                "-t", "nii",
+                            ]
+                            if segimage2itkimage_conda:
+                                conda_prefix = os.environ.get("CONDA_PREFIX")
+                                os.environ["LD_LIBRARY_PATH"] = f"{conda_prefix}/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
+                                segimage2itkimage_cmd[0] = os.path.join(conda_prefix, "bin", "segimage2itkimage")
+                            subprocess.run(segimage2itkimage_cmd, check=True)
+                            # pad_mask_to_image(seg_out_tmp, nii_dst, seg_out_tmp)  # ensure mask matches image geometry
+                            # mask_dcm_to_nii(image_dcm_dir=dicom_folder, seg_file=seg_dcm, image_nifti_file=nii_dst, seg_dir_out=case_outdir, logger=logger)  # my manual function
+                        else:
+                            logger.warning(f"Segmentation DICOM {seg_filename} not found for {case_id}")
+                            continue
+                    if not masks_existed_before:
+                        pad_mask_to_image(seg_out_tmp, nii_dst, seg_out_tmp)  # ensure mask matches image geometry
+                
+                if not os.path.exists(combined_seg_path) or not masks_existed_before:
+                    combine_masks(case_outdir, combined_seg_path=combined_seg_path, include_cyst=False)
+                
+                logger.info(f"Segmentation conversion completed for {case_id}")
     
     logger.info(f"Manually created NIfTIs for {len(manually_created_niftis)} series: {', '.join(manually_created_niftis)}")
     logger.info(f"No NIfTI could be created for {len(no_niftis)} series: {', '.join(no_niftis)}")
@@ -1276,6 +1277,7 @@ def fill_hole_and_morphological_close(left_nii, fill_holes=True, morphological_c
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
 def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, metadata_csv_out=None, remove_small_blobs=True, fill_holes=True, morphological_closing=True, image_filename="0502_VENOUS.nii", tumor_mask_filename="segmentation_tumor.nii.gz", combined_organ_mask_filename="segmentation_organs_combined.nii.gz", mask_filename_out="segmentation.nii.gz", task="total", overwrite=False, visualize=True, orient=True):
+    logger.info(f"run_totalsegmentator(nifti_dir={nifti_dir}, selected_segmentations={selected_segmentations}, metadata_csv={metadata_csv}, metadata_csv_out={metadata_csv_out}, remove_small_blobs={remove_small_blobs}, fill_holes={fill_holes}, morphological_closing={morphological_closing}, image_filename={image_filename}, tumor_mask_filename={tumor_mask_filename}, combined_organ_mask_filename={combined_organ_mask_filename}, mask_filename_out={mask_filename_out}, task={task}, overwrite={overwrite}, visualize={visualize}, orient={orient})")
     if selected_segmentations is None or len(selected_segmentations) == 0:
         raise ValueError("selected_segmentations must be a non-empty list of segmentation names to include in the combined mask.")
 
@@ -2704,6 +2706,9 @@ def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_max
         if not os.path.exists(nifti_path):
             is_4d[case_id] = False
             is_missing[case_id] = True
+            if os.path.exists(case_dir):
+                logger.warning(f"Image file {nifti_path} not found for case {case_id}. This case will be removed from the dataset.")
+                shutil.rmtree(case_dir, ignore_errors=True)
             continue
         img_nii = nib.load(nifti_path)
         img = img_nii.get_fdata()
@@ -2729,20 +2734,21 @@ def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_max
         is_missing_df = pd.DataFrame(list(is_missing.items()), columns=["series_id", "is_missing"])
         metadata_df = metadata_df.merge(is_missing_df, on="series_id", how="left")
         if filter_from_metadata:
-            metadata_df = metadata_df[~metadata_df["is_missing"]].copy()  # filter out missing series from metadata if they were deleted from dataset
+            metadata_df = metadata_df[~metadata_df["is_missing"].fillna(False)].copy()  # filter out missing series from metadata if they were deleted from dataset
     if is_4d:
         if "is_4d" in metadata_df.columns:
             metadata_df.drop(columns=["is_4d"], inplace=True)
         is_4d_df = pd.DataFrame(list(is_4d.items()), columns=["series_id", "is_4d"])
         metadata_df = metadata_df.merge(is_4d_df, on="series_id", how="left")
         if filter_from_metadata:
-            metadata_df = metadata_df[~metadata_df["is_4d"]].copy()  # filter out 4D series from metadata if they were deleted from dataset
+            metadata_df = metadata_df[~metadata_df["is_4d"].fillna(False)].copy()  # filter out 4D series from metadata if they were deleted from dataset
     if max_zoom_maximum is not None:
         if "max_zoom" in metadata_df.columns:
             metadata_df.drop(columns=["max_zoom"], inplace=True)
         max_zooms_df = pd.DataFrame(list(max_zooms.items()), columns=["series_id", "max_zoom"])
         metadata_df = metadata_df.merge(max_zooms_df, on="series_id", how="left")
         if filter_from_metadata:
+            metadata_df["max_zoom"] = metadata_df["max_zoom"].fillna(0)  # if missing zoom info, assume it's 0 which is below any reasonable threshold
             metadata_df = metadata_df[metadata_df["max_zoom"] <= max_zoom_maximum].copy()  # filter out series with zoom values exceeding the maximum threshold from metadata if they were deleted from dataset
     return metadata_df
 
