@@ -689,6 +689,8 @@ def add_viable_info(dcm_dir, metadata_csv, min_files=5, max_thickness_mm=10, out
 
         if series_uid not in series_to_folder:
             logger.debug(f"Series UID {series_uid} imaging not found in DICOM directory tree")
+            case_viable.append(False)
+            viable_reason.append("Series UID not found in DICOM directory")
             continue
         
         dicom_folder = series_to_folder[series_uid]
@@ -703,6 +705,8 @@ def add_viable_info(dcm_dir, metadata_csv, min_files=5, max_thickness_mm=10, out
 
     if out is not None:
         metadata_df.to_csv(out, index=False)
+    
+    print(f"Viability check complete: {sum(case_viable)}/{len(case_viable)} ({sum(case_viable)/len(case_viable)*100:.2f}%) series appear viable.")
 
     return metadata_df
 
@@ -782,7 +786,7 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
         if not os.path.exists(nii_dst):
             if os.path.exists(nii_src):
                 os.replace(nii_src, nii_dst)
-            elif os.path.exists(os.path.join(case_outdir, f"{series_uid}_i00001.nii.gz")):  # split view ie axial, coronal, sagittal in 3 files - pick axial
+            elif os.path.exists(os.path.join(case_outdir, f"{series_uid}_i00001.nii.gz")):  # split view ie axial, coronal, sagittal in 3 files - pick the one with >= min_files slices (required) and axial orientation if possible
                 # loop through niftis in case_outdir
                 nii_backups = []
                 for f in os.listdir(case_outdir):
@@ -793,8 +797,11 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
                                 json_content = json.load(jf)
                             nii_src = os.path.join(case_outdir, f)
                             if json_content["ImageOrientationPatientDICOM"] == [1, 0, 0, 0, 1, 0]:  # axial
-                                os.replace(nii_src, nii_dst)
-                                break
+                                nii = nib.load(nii_src)
+                                z_dim = nii.shape[2]
+                                if z_dim >= min_files:  # if this axial view has at least min_files slices, use it
+                                    os.replace(nii_src, nii_dst)
+                                    break
                             else:
                                 nii_backups.append(nii_src)
                 # backup
@@ -806,7 +813,7 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
                     if z_dim > z_best:
                         z_best = z_dim
                         nii_src = nii_path
-                if z_best > 5:  # if we found a backup with more than 5 slices, use it
+                if z_best >= min_files:  # if we found a backup with at least min_files slices, use it
                     logger.warning(f"Using backup nifti {nii_src} with {z_best} slices for {case_id} since original split view files did not have axial orientation")
                     os.replace(nii_src, nii_dst)
 
@@ -2698,8 +2705,11 @@ def update_phase_column_with_acquisition_time(metadata_df, dcm_dir=None):
     
     return metadata_df
 
-def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_maximum=20, filter_from_metadata=True, image_filename="imaging.nii.gz"):
-    is_4d, max_zooms, is_missing = {}, {}, {}
+def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, min_z=10, max_zoom_maximum=20, filter_from_metadata=True, image_filename="imaging.nii.gz"):
+    num_cases_original = len(metadata_df)
+    series_ids_original = set(metadata_df["series_id"].unique())
+    
+    is_4d, is_thin, max_zooms, is_missing, max_zoom_dict = {}, {}, {}, {}, {}
     for case_id in metadata_df["series_id"].unique():
         case_dir = os.path.join(nifti_dir, case_id)
         nifti_path = os.path.join(case_dir, image_filename)
@@ -2711,7 +2721,24 @@ def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_max
                 shutil.rmtree(case_dir, ignore_errors=True)
             continue
         img_nii = nib.load(nifti_path)
-        img = img_nii.get_fdata()
+        try:
+            img = img_nii.get_fdata()
+        except np.exceptions.DTypePromotionError as e:  # weird corrupted file
+            logger.warning(f"Error loading NIfTI file {nifti_path} for case {case_id}: {e}. This may indicate a corrupted or non-standard NIfTI file. This case will be removed from the dataset.")
+            is_4d[case_id] = False
+            is_missing[case_id] = True
+            if os.path.exists(case_dir):
+                shutil.rmtree(case_dir, ignore_errors=True)
+            continue
+        
+        if min_z is not None and img.shape[2] < min_z:
+            logger.warning(f"Case {case_id} has only {img.shape[2]} slices, which is below the minimum threshold of {min_z}. This case will be removed from the dataset.")
+            is_4d[case_id] = False
+            is_thin[case_id] = True
+            if os.path.exists(case_dir):
+                shutil.rmtree(case_dir, ignore_errors=True)
+            continue
+        
         is_4d_case = (img.ndim == 4)
         is_4d[case_id] = is_4d_case
         if is_4d and is_4d_case:
@@ -2735,6 +2762,13 @@ def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_max
         metadata_df = metadata_df.merge(is_missing_df, on="series_id", how="left")
         if filter_from_metadata:
             metadata_df = metadata_df[~metadata_df["is_missing"].fillna(False)].copy()  # filter out missing series from metadata if they were deleted from dataset
+    if is_thin:
+        if "is_thin" in metadata_df.columns:
+            metadata_df.drop(columns=["is_thin"], inplace=True)
+        is_thin_df = pd.DataFrame(list(is_thin.items()), columns=["series_id", "is_thin"])
+        metadata_df = metadata_df.merge(is_thin_df, on="series_id", how="left")
+        if filter_from_metadata:
+            metadata_df = metadata_df[~metadata_df["is_thin"].fillna(False)].copy()  # filter out thin series from metadata if they were deleted from dataset
     if is_4d:
         if "is_4d" in metadata_df.columns:
             metadata_df.drop(columns=["is_4d"], inplace=True)
@@ -2749,7 +2783,15 @@ def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_max
         metadata_df = metadata_df.merge(max_zooms_df, on="series_id", how="left")
         if filter_from_metadata:
             metadata_df["max_zoom"] = metadata_df["max_zoom"].fillna(0)  # if missing zoom info, assume it's 0 which is below any reasonable threshold
+            max_zoom_dict = dict(zip(metadata_df["series_id"], metadata_df["max_zoom"]))
             metadata_df = metadata_df[metadata_df["max_zoom"] <= max_zoom_maximum].copy()  # filter out series with zoom values exceeding the maximum threshold from metadata if they were deleted from dataset
+    if filter_from_metadata:
+        num_cases_after = len(metadata_df)
+        logger.info(f"Filtered out {num_cases_original - num_cases_after} / {num_cases_original} cases from metadata based on missing files, 4D images, or excessive zoom values. Remaining cases: {num_cases_after}.")
+        removed_cases = series_ids_original - set(metadata_df["series_id"].unique())
+        if removed_cases:
+            logger.info(f"Removed cases: {', '.join(removed_cases)}")
+            logger.info(f"Dicts: '4D': {sum(is_4d.values())}, 'thin': {sum(is_thin.values())}, 'missing': {sum(is_missing.values())}, 'zooms': {len(max_zoom_dict)}")
     return metadata_df
 
 
