@@ -2705,42 +2705,71 @@ def update_phase_column_with_acquisition_time(metadata_df, dcm_dir=None):
     
     return metadata_df
 
-def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, min_z=10, max_zoom_maximum=20, filter_from_metadata=True, image_filename="imaging.nii.gz"):
+def check_and_delete_bad_niftis(
+    metadata_df,
+    nifti_dir,
+    is_4d=True,
+    min_z=10,
+    max_zoom_maximum=20,
+    filter_from_metadata=True,
+    image_filename="imaging.nii.gz",
+    filter_if_max_zoom_not_in_si_position=False,
+):
     num_cases_original = len(metadata_df)
     series_ids_original = set(metadata_df["series_id"].unique())
-    
-    is_4d, is_thin, max_zooms, is_missing, max_zoom_dict = {}, {}, {}, {}, {}
-    for case_id in metadata_df["series_id"].unique():
+
+    status_rows = []
+    max_zoom_dict = {}
+
+    for case_id in tqdm(metadata_df["series_id"].unique(), desc="Checking NIfTI files for quality control"):
+        case_status = {
+            "series_id": case_id,
+            "is_4d": False,
+            "is_thin": False,
+            "is_missing": False,
+            "max_zoom": np.nan,
+            "orientation_original": np.nan,
+            "sampling_original": np.nan,
+            "max_zoom_not_in_si_position": False,
+        }
         case_dir = os.path.join(nifti_dir, case_id)
         nifti_path = os.path.join(case_dir, image_filename)
         if not os.path.exists(nifti_path):
-            is_4d[case_id] = False
-            is_missing[case_id] = True
+            case_status["is_missing"] = True
             if os.path.exists(case_dir):
                 logger.warning(f"Image file {nifti_path} not found for case {case_id}. This case will be removed from the dataset.")
                 shutil.rmtree(case_dir, ignore_errors=True)
+            status_rows.append(case_status)
             continue
         img_nii = nib.load(nifti_path)
         try:
             img = img_nii.get_fdata()
         except np.exceptions.DTypePromotionError as e:  # weird corrupted file
             logger.warning(f"Error loading NIfTI file {nifti_path} for case {case_id}: {e}. This may indicate a corrupted or non-standard NIfTI file. This case will be removed from the dataset.")
-            is_4d[case_id] = False
-            is_missing[case_id] = True
+            case_status["is_missing"] = True
             if os.path.exists(case_dir):
                 shutil.rmtree(case_dir, ignore_errors=True)
+            status_rows.append(case_status)
             continue
         
         if min_z is not None and img.shape[2] < min_z:
             logger.warning(f"Case {case_id} has only {img.shape[2]} slices, which is below the minimum threshold of {min_z}. This case will be removed from the dataset.")
-            is_4d[case_id] = False
-            is_thin[case_id] = True
+            case_status["is_thin"] = True
             if os.path.exists(case_dir):
                 shutil.rmtree(case_dir, ignore_errors=True)
+            status_rows.append(case_status)
             continue
         
         is_4d_case = (img.ndim == 4)
-        is_4d[case_id] = is_4d_case
+        case_status["is_4d"] = is_4d_case
+        orientation_original = nib.orientations.aff2axcodes(img_nii.affine)
+        sampling_original = img_nii.header.get_zooms()
+        case_status["orientation_original"] = orientation_original
+        case_status["sampling_original"] = sampling_original
+        spatial_zooms = sampling_original[:len(orientation_original)]
+        if len(spatial_zooms) > 0:
+            max_zoom_axis = int(np.argmax(spatial_zooms))
+            case_status["max_zoom_not_in_si_position"] = orientation_original[max_zoom_axis] not in ("S", "I")
         if is_4d and is_4d_case:
             # erase folder
             if os.path.exists(case_dir):
@@ -2748,50 +2777,53 @@ def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, min_z=10, ma
                 shutil.rmtree(case_dir, ignore_errors=True)
         if max_zoom_maximum is not None:
             zooms = img_nii.header.get_zooms()
-            max_zooms[case_id] = max(zooms)
+            case_status["max_zoom"] = max(zooms)
             if max(zooms) > max_zoom_maximum:
                 logger.warning(f"Case {case_id} has at least one zoom value above the maximum threshold of {max_zoom_maximum}. This case will be removed from the dataset.")
                 if os.path.exists(case_dir):
                     shutil.rmtree(case_dir, ignore_errors=True)
-    
-    # merge is_4d info back to metadata_df by series_id
-    if is_missing:
-        if "is_missing" in metadata_df.columns:
-            metadata_df.drop(columns=["is_missing"], inplace=True)
-        is_missing_df = pd.DataFrame(list(is_missing.items()), columns=["series_id", "is_missing"])
-        metadata_df = metadata_df.merge(is_missing_df, on="series_id", how="left")
-        if filter_from_metadata:
-            metadata_df = metadata_df[~metadata_df["is_missing"].fillna(False)].copy()  # filter out missing series from metadata if they were deleted from dataset
-    if is_thin:
-        if "is_thin" in metadata_df.columns:
-            metadata_df.drop(columns=["is_thin"], inplace=True)
-        is_thin_df = pd.DataFrame(list(is_thin.items()), columns=["series_id", "is_thin"])
-        metadata_df = metadata_df.merge(is_thin_df, on="series_id", how="left")
-        if filter_from_metadata:
-            metadata_df = metadata_df[~metadata_df["is_thin"].fillna(False)].copy()  # filter out thin series from metadata if they were deleted from dataset
-    if is_4d:
-        if "is_4d" in metadata_df.columns:
-            metadata_df.drop(columns=["is_4d"], inplace=True)
-        is_4d_df = pd.DataFrame(list(is_4d.items()), columns=["series_id", "is_4d"])
-        metadata_df = metadata_df.merge(is_4d_df, on="series_id", how="left")
-        if filter_from_metadata:
+
+        status_rows.append(case_status)
+
+    status_df = pd.DataFrame(status_rows)
+    status_cols = [
+        "is_missing",
+        "is_thin",
+        "is_4d",
+        "max_zoom",
+        "orientation_original",
+        "sampling_original",
+        "max_zoom_not_in_si_position",
+    ]
+    drop_cols = [c for c in status_cols if c in metadata_df.columns]
+    if drop_cols:
+        metadata_df = metadata_df.drop(columns=drop_cols)
+    metadata_df = metadata_df.merge(status_df, on="series_id", how="left")
+
+    if filter_from_metadata:
+        metadata_df = metadata_df[~metadata_df["is_missing"].fillna(False)].copy()  # filter out missing series from metadata if they were deleted from dataset
+        metadata_df = metadata_df[~metadata_df["is_thin"].fillna(False)].copy()  # filter out thin series from metadata if they were deleted from dataset
+        if is_4d:
             metadata_df = metadata_df[~metadata_df["is_4d"].fillna(False)].copy()  # filter out 4D series from metadata if they were deleted from dataset
-    if max_zoom_maximum is not None:
-        if "max_zoom" in metadata_df.columns:
-            metadata_df.drop(columns=["max_zoom"], inplace=True)
-        max_zooms_df = pd.DataFrame(list(max_zooms.items()), columns=["series_id", "max_zoom"])
-        metadata_df = metadata_df.merge(max_zooms_df, on="series_id", how="left")
-        if filter_from_metadata:
+        if max_zoom_maximum is not None:
             metadata_df["max_zoom"] = metadata_df["max_zoom"].fillna(0)  # if missing zoom info, assume it's 0 which is below any reasonable threshold
             max_zoom_dict = dict(zip(metadata_df["series_id"], metadata_df["max_zoom"]))
             metadata_df = metadata_df[metadata_df["max_zoom"] <= max_zoom_maximum].copy()  # filter out series with zoom values exceeding the maximum threshold from metadata if they were deleted from dataset
+        if filter_if_max_zoom_not_in_si_position:
+            metadata_df = metadata_df[~metadata_df["max_zoom_not_in_si_position"].fillna(False)].copy()
+
     if filter_from_metadata:
         num_cases_after = len(metadata_df)
         logger.info(f"Filtered out {num_cases_original - num_cases_after} / {num_cases_original} cases from metadata based on missing files, 4D images, or excessive zoom values. Remaining cases: {num_cases_after}.")
         removed_cases = series_ids_original - set(metadata_df["series_id"].unique())
         if removed_cases:
             logger.info(f"Removed cases: {', '.join(removed_cases)}")
-            logger.info(f"Dicts: '4D': {sum(is_4d.values())}, 'thin': {sum(is_thin.values())}, 'missing': {sum(is_missing.values())}, 'zooms': {len(max_zoom_dict)}")
+            logger.info(
+                f"Flags: '4D': {int(status_df['is_4d'].fillna(False).sum())}, "
+                f"'thin': {int(status_df['is_thin'].fillna(False).sum())}, "
+                f"'missing': {int(status_df['is_missing'].fillna(False).sum())}, "
+                f"'zooms': {len(max_zoom_dict)}"
+            )
     return metadata_df
 
 
