@@ -689,6 +689,8 @@ def add_viable_info(dcm_dir, metadata_csv, min_files=5, max_thickness_mm=10, out
 
         if series_uid not in series_to_folder:
             logger.debug(f"Series UID {series_uid} imaging not found in DICOM directory tree")
+            case_viable.append(False)
+            viable_reason.append("Series UID not found in DICOM directory")
             continue
         
         dicom_folder = series_to_folder[series_uid]
@@ -703,6 +705,8 @@ def add_viable_info(dcm_dir, metadata_csv, min_files=5, max_thickness_mm=10, out
 
     if out is not None:
         metadata_df.to_csv(out, index=False)
+    
+    print(f"Viability check complete: {sum(case_viable)}/{len(case_viable)} ({sum(case_viable)/len(case_viable)*100:.2f}%) series appear viable.")
 
     return metadata_df
 
@@ -786,7 +790,7 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
         if not os.path.exists(nii_dst):
             if os.path.exists(nii_src):
                 os.replace(nii_src, nii_dst)
-            elif os.path.exists(os.path.join(case_outdir, f"{series_uid}_i00001.nii.gz")):  # split view ie axial, coronal, sagittal in 3 files - pick axial
+            elif os.path.exists(os.path.join(case_outdir, f"{series_uid}_i00001.nii.gz")):  # split view ie axial, coronal, sagittal in 3 files - pick the one with >= min_files slices (required) and axial orientation if possible
                 # loop through niftis in case_outdir
                 nii_backups = []
                 for f in os.listdir(case_outdir):
@@ -797,8 +801,11 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
                                 json_content = json.load(jf)
                             nii_src = os.path.join(case_outdir, f)
                             if json_content["ImageOrientationPatientDICOM"] == [1, 0, 0, 0, 1, 0]:  # axial
-                                os.replace(nii_src, nii_dst)
-                                break
+                                nii = nib.load(nii_src)
+                                z_dim = nii.shape[2]
+                                if z_dim >= min_files:  # if this axial view has at least min_files slices, use it
+                                    os.replace(nii_src, nii_dst)
+                                    break
                             else:
                                 nii_backups.append(nii_src)
                 # backup
@@ -810,7 +817,7 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
                     if z_dim > z_best:
                         z_best = z_dim
                         nii_src = nii_path
-                if z_best > 5:  # if we found a backup with more than 5 slices, use it
+                if z_best >= min_files:  # if we found a backup with at least min_files slices, use it
                     logger.warning(f"Using backup nifti {nii_src} with {z_best} slices for {case_id} since original split view files did not have axial orientation")
                     os.replace(nii_src, nii_dst)
 
@@ -1280,7 +1287,7 @@ def fill_hole_and_morphological_close(left_nii, fill_holes=True, morphological_c
     return left_nii
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
-def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, metadata_csv_out=None, remove_small_blobs=True, fill_holes=True, morphological_closing=True, image_filename="0502_VENOUS.nii", tumor_mask_filename="segmentation_tumor.nii.gz", combined_organ_mask_filename="segmentation_organs_combined.nii.gz", mask_filename_out="segmentation.nii.gz", task="total", overwrite=False, visualize=True, orient=True):
+def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, metadata_csv_out=None, remove_small_blobs=True, fill_holes=True, morphological_closing=True, image_filename="0502_VENOUS.nii", tumor_mask_filename="segmentation_tumor.nii.gz", combined_organ_mask_filename="segmentation_organs_combined.nii.gz", mask_filename_out="segmentation.nii.gz", task="total", overwrite=False, visualize=True, orient=True, device=None):
     logger.info(f"run_totalsegmentator(nifti_dir={nifti_dir}, selected_segmentations={selected_segmentations}, metadata_csv={metadata_csv}, metadata_csv_out={metadata_csv_out}, remove_small_blobs={remove_small_blobs}, fill_holes={fill_holes}, morphological_closing={morphological_closing}, image_filename={image_filename}, tumor_mask_filename={tumor_mask_filename}, combined_organ_mask_filename={combined_organ_mask_filename}, mask_filename_out={mask_filename_out}, task={task}, overwrite={overwrite}, visualize={visualize}, orient={orient})")
     if selected_segmentations is None or len(selected_segmentations) == 0:
         raise ValueError("selected_segmentations must be a non-empty list of segmentation names to include in the combined mask.")
@@ -1338,15 +1345,21 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
         
         if remove_small_blobs:
             totalsegmentator_command += ["--remove_small_blobs"]
+        if device is not None:
+            totalsegmentator_command += ["--device", device]
         
         if all(os.path.exists(os.path.join(totalsegmentator_dir, f"{seg_name}.nii.gz")) for seg_name in selected_segmentations) and not overwrite:
             logger.info(f"TotalSegmentator has already been run for series_id {series_id}.")
         else:
             logger.info(f"Running TotalSegmentator for series_id {series_id} with command: {' '.join(totalsegmentator_command)}")
-            subprocess.run(totalsegmentator_command, check=True)
+            try:
+                subprocess.run(totalsegmentator_command, check=True)
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Error occurred while running TotalSegmentator for series_id {series_id}: {e}")
+                continue
 
         if not all(os.path.exists(os.path.join(totalsegmentator_dir, f"{seg_name}.nii.gz")) for seg_name in selected_segmentations):
-            logger.info(f"Predicted segmentation files not found for series_id {series_id}. Skipping.")
+            logger.error(f"Predicted segmentation files not found for series_id {series_id}. Skipping.")
             continue
 
         #* combine all organ segmentations
@@ -1391,8 +1404,8 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
         #* Combined organ and tumor segmentations
         if not os.path.exists(combined_organ_tumor_segmentation_file) or overwrite:
             if tumor_segmentation_file is None or not os.path.exists(tumor_segmentation_file):
-                # copy predicted_organ_segmentation_file_combined to combined_organ_tumor_segmentation_file
-                shutil.copy2(predicted_organ_segmentation_file_combined, combined_organ_tumor_segmentation_file)
+                shutil.copy2(predicted_organ_segmentation_file_combined, combined_organ_tumor_segmentation_file)  # copy
+                # os.rename(predicted_organ_segmentation_file_combined, combined_organ_tumor_segmentation_file)  # rename
             else:
                 logger.info(f"Combining organ and tumor segmentations for series_id {series_id}...")
                 tumor_nii = nib.load(tumor_segmentation_file)
@@ -2702,22 +2715,71 @@ def update_phase_column_with_acquisition_time(metadata_df, dcm_dir=None):
     
     return metadata_df
 
-def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_maximum=20, filter_from_metadata=True, image_filename="imaging.nii.gz"):
-    is_4d, max_zooms, is_missing = {}, {}, {}
-    for case_id in metadata_df["series_id"].unique():
+def check_and_delete_bad_niftis(
+    metadata_df,
+    nifti_dir,
+    is_4d=True,
+    min_z=10,
+    max_zoom_maximum=20,
+    filter_from_metadata=True,
+    image_filename="imaging.nii.gz",
+    filter_if_max_zoom_not_in_si_position=False,
+):
+    num_cases_original = len(metadata_df)
+    series_ids_original = set(metadata_df["series_id"].unique())
+
+    status_rows = []
+    max_zoom_dict = {}
+
+    for case_id in tqdm(metadata_df["series_id"].unique(), desc="Checking NIfTI files for quality control"):
+        case_status = {
+            "series_id": case_id,
+            "is_4d": False,
+            "is_thin": False,
+            "is_missing": False,
+            "max_zoom": np.nan,
+            "orientation_original": np.nan,
+            "sampling_original": np.nan,
+            "max_zoom_not_in_si_position": False,
+        }
         case_dir = os.path.join(nifti_dir, case_id)
         nifti_path = os.path.join(case_dir, image_filename)
         if not os.path.exists(nifti_path):
-            is_4d[case_id] = False
-            is_missing[case_id] = True
+            case_status["is_missing"] = True
             if os.path.exists(case_dir):
                 logger.warning(f"Image file {nifti_path} not found for case {case_id}. This case will be removed from the dataset.")
                 shutil.rmtree(case_dir, ignore_errors=True)
+            status_rows.append(case_status)
             continue
         img_nii = nib.load(nifti_path)
-        img = img_nii.get_fdata()
+        try:
+            img = img_nii.get_fdata()
+        except np.exceptions.DTypePromotionError as e:  # weird corrupted file
+            logger.warning(f"Error loading NIfTI file {nifti_path} for case {case_id}: {e}. This may indicate a corrupted or non-standard NIfTI file. This case will be removed from the dataset.")
+            case_status["is_missing"] = True
+            if os.path.exists(case_dir):
+                shutil.rmtree(case_dir, ignore_errors=True)
+            status_rows.append(case_status)
+            continue
+        
+        if min_z is not None and img.shape[2] < min_z:
+            logger.warning(f"Case {case_id} has only {img.shape[2]} slices, which is below the minimum threshold of {min_z}. This case will be removed from the dataset.")
+            case_status["is_thin"] = True
+            if os.path.exists(case_dir):
+                shutil.rmtree(case_dir, ignore_errors=True)
+            status_rows.append(case_status)
+            continue
+        
         is_4d_case = (img.ndim == 4)
-        is_4d[case_id] = is_4d_case
+        case_status["is_4d"] = is_4d_case
+        orientation_original = nib.orientations.aff2axcodes(img_nii.affine)
+        sampling_original = img_nii.header.get_zooms()
+        case_status["orientation_original"] = orientation_original
+        case_status["sampling_original"] = sampling_original
+        spatial_zooms = sampling_original[:len(orientation_original)]
+        if len(spatial_zooms) > 0:
+            max_zoom_axis = int(np.argmax(spatial_zooms))
+            case_status["max_zoom_not_in_si_position"] = orientation_original[max_zoom_axis] not in ("S", "I")
         if is_4d and is_4d_case:
             # erase folder
             if os.path.exists(case_dir):
@@ -2725,35 +2787,53 @@ def check_and_delete_bad_niftis(metadata_df, nifti_dir, is_4d=True, max_zoom_max
                 shutil.rmtree(case_dir, ignore_errors=True)
         if max_zoom_maximum is not None:
             zooms = img_nii.header.get_zooms()
-            max_zooms[case_id] = max(zooms)
+            case_status["max_zoom"] = max(zooms)
             if max(zooms) > max_zoom_maximum:
                 logger.warning(f"Case {case_id} has at least one zoom value above the maximum threshold of {max_zoom_maximum}. This case will be removed from the dataset.")
                 if os.path.exists(case_dir):
                     shutil.rmtree(case_dir, ignore_errors=True)
-    
-    # merge is_4d info back to metadata_df by series_id
-    if is_missing:
-        if "is_missing" in metadata_df.columns:
-            metadata_df.drop(columns=["is_missing"], inplace=True)
-        is_missing_df = pd.DataFrame(list(is_missing.items()), columns=["series_id", "is_missing"])
-        metadata_df = metadata_df.merge(is_missing_df, on="series_id", how="left")
-        if filter_from_metadata:
-            metadata_df = metadata_df[~metadata_df["is_missing"].fillna(False)].copy()  # filter out missing series from metadata if they were deleted from dataset
-    if is_4d:
-        if "is_4d" in metadata_df.columns:
-            metadata_df.drop(columns=["is_4d"], inplace=True)
-        is_4d_df = pd.DataFrame(list(is_4d.items()), columns=["series_id", "is_4d"])
-        metadata_df = metadata_df.merge(is_4d_df, on="series_id", how="left")
-        if filter_from_metadata:
+
+        status_rows.append(case_status)
+
+    status_df = pd.DataFrame(status_rows)
+    status_cols = [
+        "is_missing",
+        "is_thin",
+        "is_4d",
+        "max_zoom",
+        "orientation_original",
+        "sampling_original",
+        "max_zoom_not_in_si_position",
+    ]
+    drop_cols = [c for c in status_cols if c in metadata_df.columns]
+    if drop_cols:
+        metadata_df = metadata_df.drop(columns=drop_cols)
+    metadata_df = metadata_df.merge(status_df, on="series_id", how="left")
+
+    if filter_from_metadata:
+        metadata_df = metadata_df[~metadata_df["is_missing"].fillna(False)].copy()  # filter out missing series from metadata if they were deleted from dataset
+        metadata_df = metadata_df[~metadata_df["is_thin"].fillna(False)].copy()  # filter out thin series from metadata if they were deleted from dataset
+        if is_4d:
             metadata_df = metadata_df[~metadata_df["is_4d"].fillna(False)].copy()  # filter out 4D series from metadata if they were deleted from dataset
-    if max_zoom_maximum is not None:
-        if "max_zoom" in metadata_df.columns:
-            metadata_df.drop(columns=["max_zoom"], inplace=True)
-        max_zooms_df = pd.DataFrame(list(max_zooms.items()), columns=["series_id", "max_zoom"])
-        metadata_df = metadata_df.merge(max_zooms_df, on="series_id", how="left")
-        if filter_from_metadata:
+        if max_zoom_maximum is not None:
             metadata_df["max_zoom"] = metadata_df["max_zoom"].fillna(0)  # if missing zoom info, assume it's 0 which is below any reasonable threshold
+            max_zoom_dict = dict(zip(metadata_df["series_id"], metadata_df["max_zoom"]))
             metadata_df = metadata_df[metadata_df["max_zoom"] <= max_zoom_maximum].copy()  # filter out series with zoom values exceeding the maximum threshold from metadata if they were deleted from dataset
+        if filter_if_max_zoom_not_in_si_position:
+            metadata_df = metadata_df[~metadata_df["max_zoom_not_in_si_position"].fillna(False)].copy()
+
+    if filter_from_metadata:
+        num_cases_after = len(metadata_df)
+        logger.info(f"Filtered out {num_cases_original - num_cases_after} / {num_cases_original} cases from metadata based on missing files, 4D images, or excessive zoom values. Remaining cases: {num_cases_after}.")
+        removed_cases = series_ids_original - set(metadata_df["series_id"].unique())
+        if removed_cases:
+            logger.info(f"Removed cases: {', '.join(removed_cases)}")
+            logger.info(
+                f"Flags: '4D': {int(status_df['is_4d'].fillna(False).sum())}, "
+                f"'thin': {int(status_df['is_thin'].fillna(False).sum())}, "
+                f"'missing': {int(status_df['is_missing'].fillna(False).sum())}, "
+                f"'zooms': {len(max_zoom_dict)}"
+            )
     return metadata_df
 
 
