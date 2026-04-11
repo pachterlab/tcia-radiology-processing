@@ -732,6 +732,10 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
         series_uid = row["Series UID"]
 
         case_outdir = os.path.join(nifti_dir, case_id)
+        if os.path.exists(case_outdir) and len(os.listdir(case_outdir)) > 0:
+            logger.debug(f"Output directory {case_outdir} already exists and is not empty, skipping conversion for case {case_id}")
+            continue
+
         os.makedirs(case_outdir, exist_ok=True)
 
         # -------------------
