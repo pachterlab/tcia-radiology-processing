@@ -736,6 +736,10 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
         series_uid = row["Series UID"]
 
         case_outdir = os.path.join(nifti_dir, case_id)
+        if os.path.exists(case_outdir) and len(os.listdir(case_outdir)) > 0:
+            logger.debug(f"Output directory {case_outdir} already exists and is not empty, skipping conversion for case {case_id}")
+            continue
+
         os.makedirs(case_outdir, exist_ok=True)
 
         # -------------------
@@ -1283,7 +1287,7 @@ def fill_hole_and_morphological_close(left_nii, fill_holes=True, morphological_c
     return left_nii
 
 @measure_time_memory_storage(enabled=PROFILE_PIPELINE, disk_path=lambda: PROFILE_PIPELINE_DATA_DIR)
-def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, metadata_csv_out=None, remove_small_blobs=True, fill_holes=True, morphological_closing=True, image_filename="0502_VENOUS.nii", tumor_mask_filename="segmentation_tumor.nii.gz", combined_organ_mask_filename="segmentation_organs_combined.nii.gz", mask_filename_out="segmentation.nii.gz", task="total", overwrite=False, visualize=True, orient=True):
+def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, metadata_csv_out=None, remove_small_blobs=True, fill_holes=True, morphological_closing=True, image_filename="0502_VENOUS.nii", tumor_mask_filename="segmentation_tumor.nii.gz", combined_organ_mask_filename="segmentation_organs_combined.nii.gz", mask_filename_out="segmentation.nii.gz", task="total", overwrite=False, visualize=True, orient=True, device=None):
     logger.info(f"run_totalsegmentator(nifti_dir={nifti_dir}, selected_segmentations={selected_segmentations}, metadata_csv={metadata_csv}, metadata_csv_out={metadata_csv_out}, remove_small_blobs={remove_small_blobs}, fill_holes={fill_holes}, morphological_closing={morphological_closing}, image_filename={image_filename}, tumor_mask_filename={tumor_mask_filename}, combined_organ_mask_filename={combined_organ_mask_filename}, mask_filename_out={mask_filename_out}, task={task}, overwrite={overwrite}, visualize={visualize}, orient={orient})")
     if selected_segmentations is None or len(selected_segmentations) == 0:
         raise ValueError("selected_segmentations must be a non-empty list of segmentation names to include in the combined mask.")
@@ -1341,15 +1345,21 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
         
         if remove_small_blobs:
             totalsegmentator_command += ["--remove_small_blobs"]
+        if device is not None:
+            totalsegmentator_command += ["--device", device]
         
         if all(os.path.exists(os.path.join(totalsegmentator_dir, f"{seg_name}.nii.gz")) for seg_name in selected_segmentations) and not overwrite:
             logger.info(f"TotalSegmentator has already been run for series_id {series_id}.")
         else:
             logger.info(f"Running TotalSegmentator for series_id {series_id} with command: {' '.join(totalsegmentator_command)}")
-            subprocess.run(totalsegmentator_command, check=True)
+            try:
+                subprocess.run(totalsegmentator_command, check=True)
+            except subprocess.CalledProcessError as e:
+                logger.error(f"Error occurred while running TotalSegmentator for series_id {series_id}: {e}")
+                continue
 
         if not all(os.path.exists(os.path.join(totalsegmentator_dir, f"{seg_name}.nii.gz")) for seg_name in selected_segmentations):
-            logger.info(f"Predicted segmentation files not found for series_id {series_id}. Skipping.")
+            logger.error(f"Predicted segmentation files not found for series_id {series_id}. Skipping.")
             continue
 
         #* combine all organ segmentations
@@ -1394,8 +1404,8 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
         #* Combined organ and tumor segmentations
         if not os.path.exists(combined_organ_tumor_segmentation_file) or overwrite:
             if tumor_segmentation_file is None or not os.path.exists(tumor_segmentation_file):
-                # copy predicted_organ_segmentation_file_combined to combined_organ_tumor_segmentation_file
-                shutil.copy2(predicted_organ_segmentation_file_combined, combined_organ_tumor_segmentation_file)
+                shutil.copy2(predicted_organ_segmentation_file_combined, combined_organ_tumor_segmentation_file)  # copy
+                # os.rename(predicted_organ_segmentation_file_combined, combined_organ_tumor_segmentation_file)  # rename
             else:
                 logger.info(f"Combining organ and tumor segmentations for series_id {series_id}...")
                 tumor_nii = nib.load(tumor_segmentation_file)
