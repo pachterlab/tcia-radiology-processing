@@ -2400,12 +2400,12 @@ def print_tcia_info(df, project=None, series_uid_col=None, study_uid_col=None, p
                 series_uid_col = col
                 break
     if study_uid_col is None:
-        for col in ["Study Instance UID", "study_id"]:
+        for col in ["Study Instance UID", "study_id", "Study UID"]:
             if col in df.columns:
                 study_uid_col = col
                 break
     if patient_id_col is None:
-        for col in ["Patient ID", "patient_id"]:
+        for col in ["Patient ID", "patient_id", "Subject ID"]:
             if col in df.columns:
                 patient_id_col = col
                 break
@@ -2724,6 +2724,7 @@ def check_and_delete_bad_niftis(
     filter_from_metadata=True,
     image_filename="imaging.nii.gz",
     filter_if_max_zoom_not_in_si_position=False,
+    out=None
 ):
     num_cases_original = len(metadata_df)
     series_ids_original = set(metadata_df["series_id"].unique())
@@ -2834,6 +2835,8 @@ def check_and_delete_bad_niftis(
                 f"'missing': {int(status_df['is_missing'].fillna(False).sum())}, "
                 f"'zooms': {len(max_zoom_dict)}"
             )
+    if out:
+        metadata_df.to_csv(out, index=False)
     return metadata_df
 
 
@@ -2860,6 +2863,16 @@ def check_few_slices(metadata_df, nifti_dir, image_filename="imaging.nii.gz"):
     metadata_df = metadata_df.merge(is_4d_df, on="series_id", how="left")
     return metadata_df
 
+def get_slice_position(d):
+    if hasattr(d, "ImagePositionPatient"):
+        return float(d.ImagePositionPatient[2])
+    elif hasattr(d, "SliceLocation"):
+        return float(d.SliceLocation)
+    elif hasattr(d, "InstanceNumber"):
+        return float(d.InstanceNumber)
+    else:
+        return 0  # last fallback
+
 
 def view_dicom_file(dicom_file, title="default", vmin=-200, vmax=300, show_colorbar=True, out_path=None):
     print(f"Viewing DICOM file: {dicom_file}")
@@ -2879,8 +2892,6 @@ def view_dicom_file(dicom_file, title="default", vmin=-200, vmax=300, show_color
         plt.savefig(out_path, bbox_inches='tight', dpi=300)
     plt.show()
 
-
-
 def view_dicom_directory(dicom_dir, vmin=None, vmax=None):
     def get_dicom_volume(dicom_dir):
         print(f"Viewing DICOM series in directory: {dicom_dir}")
@@ -2891,7 +2902,7 @@ def view_dicom_directory(dicom_dir, vmin=None, vmax=None):
             print(f"No DICOM files found in directory: {dicom_dir}")
             return None
         
-        files.sort(key=lambda x: float(x.ImagePositionPatient[2]))
+        files.sort(key=get_slice_position)
         
         volume = np.stack([f.pixel_array for f in files])
         return volume
