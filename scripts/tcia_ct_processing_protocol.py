@@ -189,21 +189,23 @@ def main():
             metadata_df = metadata_df[metadata_df["Series UID"].isin(series_uids)]
         
         dicom_dir = os.path.join(data_dir, manifest_file_name.split(".")[0], dataset.upper())
-        if shutil.which(nbia_data_retriever) is None:
-            sys.exit(f"Error: {nbia_data_retriever} not found in PATH. Please install or add it to PATH.")
-
-        nbia_command = f"yes 'Y\nM' | {nbia_data_retriever} --cli {manifest_file_path} -d {data_dir} -v -f"
+        
         if not os.path.exists(dicom_dir) or len(os.listdir(dicom_dir)) == 0:   #!!! comment out
+            if shutil.which(nbia_data_retriever) is None:
+                sys.exit(f"Error: {nbia_data_retriever} not found in PATH. Please install or add it to PATH.")
+
+            nbia_command = f"yes 'Y\nM' | {nbia_data_retriever} --cli {manifest_file_path} -d {data_dir} -v -f"
+
             print(f"Running NBIA Data Retriever with command:\n{nbia_command}")
             subprocess.run(nbia_command, shell=True, check=True)
 
-        print(f"Downloaded images to: {dicom_dir}")
+            print(f"Downloaded images to: {dicom_dir}")
 
-        metadata_df = utils.add_viable_info(dicom_dir, metadata_df, min_files=10, max_thickness_mm=10, include_kernel_keywords=True, out=imaging_metadata_csv, overwrite=True)
+            metadata_df = utils.add_viable_info(dicom_dir, metadata_df, min_files=10, max_thickness_mm=10, include_kernel_keywords=True, out=imaging_metadata_csv, overwrite=True)
 
-        metadata_df = metadata_df[metadata_df["is_viable"]]
-        metadata_df = metadata_df[metadata_df["Modality"] == "CT"]
-        utils.print_tcia_info(metadata_df, project=dataset)
+            metadata_df = metadata_df[metadata_df["is_viable"]]
+            metadata_df = metadata_df[metadata_df["Modality"] == "CT"]
+            utils.print_tcia_info(metadata_df, project=dataset)
 
 
         image_filename = "imaging.nii.gz"
@@ -215,9 +217,9 @@ def main():
             utils.convert_dcm_to_nii_and_organize(dicom_dir, metadata_df, nifti_dir, segimage2itkimage_conda=False)
             print(f"convert_dcm_to_nii_and_organize metrics: {utils.convert_dcm_to_nii_and_organize.last_metrics}")
 
-        # filter out 4D volumes and niis with big max zoom (sometimes some series will have an axial localizer but an otherwise coronal/sagittal series - we want to exclude these)
-        metadata_df = utils.check_and_delete_bad_niftis(metadata_df, nifti_dir, image_filename=image_filename, is_4d=True, min_z=10, max_zoom_maximum=20, filter_if_max_zoom_not_in_si_position=False, out=imaging_metadata_csv)
-        utils.print_tcia_info(metadata_df, project=dataset)
+            # filter out 4D volumes and niis with big max zoom (sometimes some series will have an axial localizer but an otherwise coronal/sagittal series - we want to exclude these)
+            metadata_df = utils.check_and_delete_bad_niftis(metadata_df, nifti_dir, image_filename=image_filename, is_4d=True, min_z=10, max_zoom_maximum=20, filter_if_max_zoom_not_in_si_position=False, out=imaging_metadata_csv)
+            utils.print_tcia_info(metadata_df, project=dataset)
     else:
         metadata_name = f"metadata_usc_{num_series}.csv" if num_series is not None else "metadata_usc.csv"
         imaging_metadata_csv = os.path.join(data_dir, metadata_name)

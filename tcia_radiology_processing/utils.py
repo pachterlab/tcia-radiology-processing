@@ -1314,8 +1314,9 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
     
     # iterate through subdirs of nifti_dir
     case_id_to_organ_overlap = {}
+    case_id_to_num_organ_mask_pixels = {}
     for series_id in sorted(os.listdir(nifti_dir)):
-        print(series_id)
+        logger.info(f"Processing series_id: {series_id}")
         nifti_case_dir = os.path.join(nifti_dir, series_id)
         if not os.path.isdir(nifti_case_dir):
             continue
@@ -1329,7 +1330,6 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
         
         modality = "CT"
         if metadata_df is not None:
-            print(series_id)
             row = metadata_df[metadata_df['series_id'] == series_id]
             if not row.empty:
                 modality = row['Modality'].values[0]
@@ -1399,6 +1399,11 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
             #     union_nii = nib.as_closest_canonical(union_nii)
 
             nib.save(union_nii, predicted_organ_segmentation_file_combined)
+
+        if os.path.exists(predicted_organ_segmentation_file_combined):
+            organ_mask_nii = nib.load(predicted_organ_segmentation_file_combined)
+            organ_mask_data = organ_mask_nii.get_fdata()
+            case_id_to_num_organ_mask_pixels[series_id] = int(np.count_nonzero(organ_mask_data > 0))
 
         
         #* Combined organ and tumor segmentations
@@ -1520,6 +1525,12 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
     
     #* save metadata CSV
     if metadata_csv is not None:
+        if "num_organ_mask_pixels" in metadata_df.columns:
+            logger.debug(f"Metadata CSV {metadata_csv} already contains 'num_organ_mask_pixels' column. It will be overwritten with new values based on TotalSegmentator results.")
+            metadata_df.drop(columns=["num_organ_mask_pixels"], inplace=True)
+        num_organ_mask_pixels_df = pd.DataFrame(list(case_id_to_num_organ_mask_pixels.items()), columns=["series_id", "num_organ_mask_pixels"])
+        metadata_df = metadata_df.merge(num_organ_mask_pixels_df, on="series_id", how="left")
+
         if "tumor_side" in metadata_df.columns and overwrite:
             logger.debug(f"Metadata CSV {metadata_csv} already contains 'tumor_side' column. It will be overwritten with new values based on TotalSegmentator results.")
             metadata_df.drop(columns=["tumor_side"], inplace=True)
@@ -1760,7 +1771,15 @@ def crop_to_nonempty(image, threshold=None, pad=5):
     nonempty = np.argwhere(data > threshold)
 
     if nonempty.size == 0:
-        raise ValueError(f"No voxels above threshold {threshold}")
+        logger.warning(f"No voxels above threshold {threshold}. Returning zeroed image with original shape.")
+
+        zero_data = np.zeros_like(data)
+
+        if return_nifti:
+            zero_nii = nib.Nifti1Image(zero_data, affine, header)
+            return zero_nii, None
+        else:
+            return zero_data, None
 
     mins = nonempty.min(axis=0)
     maxs = nonempty.max(axis=0) + 1
@@ -1860,7 +1879,10 @@ def apply_mask(image_file, mask_file, label=None, crop=True, min_value=None, pad
 
     if crop:
         masked_image_nii, bbox = crop_to_nonempty(masked_image_nii, threshold=min_value, pad=pad_after_crop)
-        mask_nii = crop_with_bbox(mask_nii, bbox)
+        if bbox is not None:
+            mask_nii = crop_with_bbox(mask_nii, bbox)
+        else:
+            logger.warning(f"After masking, no voxels above min_value {min_value} were found. Skipping cropping.")
     
     if out_image:
         nib.save(masked_image_nii, out_image)
@@ -1894,6 +1916,12 @@ def compute_shape_histogram(nifti_dir, image_filename):
             continue
 
         image_nii = nib.load(image_path)
+        
+        # skip if image_nii is totally uniform (e.g. all zeros after masking)
+        if np.all(image_nii.get_fdata() == image_nii.get_fdata().flat[0]):
+            logger.warning(f"Image {image_path} is uniform. Skipping extent calculation for this image.")
+            continue
+
         x_extents.append(image_nii.shape[0])
         y_extents.append(image_nii.shape[1])
         if len(image_nii.shape) > 2:
