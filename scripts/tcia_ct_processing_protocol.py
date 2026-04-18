@@ -124,6 +124,8 @@ def main():
             imaging_metadata_df.insert(0, "series_id", [f"series_{i:05d}" for i in range(len(imaging_metadata_df))])
             imaging_metadata_df["project"] = project
             imaging_metadata_df["subproject"] = dataset
+            imaging_metadata_df["cancer_organ"] = tcia_dataset_to_info[dataset]["cancer_organ"]
+            imaging_metadata_df["cancer_type"] = tcia_dataset_to_info[dataset]["cancer_type"]
             
             # change column names to match old format
             col_renames = {
@@ -262,7 +264,7 @@ def main():
         image_filename_set = set([os.path.basename(f) for f in final_image_files])
         assert len(image_filename_set) == 1, f"Expected all image files to have the same filename, but found: {image_filename_set}"
         image_filename = list(image_filename_set)[0]
-        tumor_mask_filename = os.path.basename(final_mask_files[0]) if final_mask_files else ""
+        tumor_mask_filename = os.path.basename(final_mask_files[0]) if final_mask_files else None
 
         print(f"Orientation metrics: {orient_metrics}")
 
