@@ -77,11 +77,8 @@ def main():
         raise ValueError(f"Dataset {dataset} not recognized. Please add it to tcia_dataset_to_info.")
     if dataset != "tcga-kirc":
         using_usc_data = False  # only tcga-kirc has USC data available, so set to False for other datasets
-    project = "other"
-    if "tcga" in dataset:
-        project = "tcga"
-    elif "cptac" in dataset:
-        project = "cptac"
+    
+    project = tcia_dataset_to_info[dataset].get("project", "other")
 
     create_organ_masks = False
     if do_masking or do_radiomics or image_dimensionality == "2D":
@@ -203,12 +200,12 @@ def main():
 
             print(f"Downloaded images to: {dicom_dir}")
 
-            metadata_df = utils.add_viable_info(dicom_dir, metadata_df, min_files=10, max_thickness_mm=10, include_kernel_keywords=True, out=imaging_metadata_csv, overwrite=True)
-
-            metadata_df = metadata_df[metadata_df["is_viable"]]
-            metadata_df = metadata_df[metadata_df["Modality"] == "CT"]
-            utils.print_tcia_info(metadata_df, project=dataset)
-
+        if "is_viable" not in metadata_df.columns:
+            metadata_df = utils.add_viable_info(dicom_dir, metadata_df, min_files=15, max_thickness_mm=10, include_kernel_keywords=True, out=imaging_metadata_csv, overwrite=True)
+        
+        metadata_df = metadata_df[metadata_df["is_viable"]]
+        metadata_df = metadata_df[metadata_df["Modality"] == "CT"]
+        utils.print_tcia_info(metadata_df, project=dataset)
 
         image_filename = "imaging.nii.gz"
         tumor_mask_filename = None
@@ -220,7 +217,7 @@ def main():
             print(f"convert_dcm_to_nii_and_organize metrics: {utils.convert_dcm_to_nii_and_organize.last_metrics}")
 
             # filter out 4D volumes and niis with big max zoom (sometimes some series will have an axial localizer but an otherwise coronal/sagittal series - we want to exclude these)
-            metadata_df = utils.check_and_delete_bad_niftis(metadata_df, nifti_dir, image_filename=image_filename, is_4d=True, min_z=10, max_zoom_maximum=20, filter_if_max_zoom_not_in_si_position=False, out=imaging_metadata_csv)
+            metadata_df = utils.check_and_delete_bad_niftis(metadata_df, nifti_dir, image_filename=image_filename, is_4d=True, min_z=25, max_zoom_maximum=20, filter_if_max_zoom_not_in_si_position=False, out=imaging_metadata_csv)
             utils.print_tcia_info(metadata_df, project=dataset)
     else:
         metadata_name = f"metadata_usc_{num_series}.csv" if num_series is not None else "metadata_usc.csv"
@@ -268,7 +265,7 @@ def main():
 
         print(f"Orientation metrics: {orient_metrics}")
 
-    if tumor_mask_filename is None and mask_value_for_best_slice_selection == 2:
+    if (tumor_mask_filename is None or tumor_mask_filename == "") and mask_value_for_best_slice_selection == 2:
         mask_value_for_best_slice_selection = 1
 
     mask_filename = None

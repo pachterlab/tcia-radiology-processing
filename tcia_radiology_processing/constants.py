@@ -1,6 +1,7 @@
 # verify links by visiting TCIA - manifest URL is what I get by clicking big blue "download" button for imaging data, and metadata url is what I get by clicking small "view" link under Metadata column
 tcia_dataset_to_info = {
     "tcga-kirc": {
+        "project": "tcga",
         "cancer_organ": "kidney",
         "cancer_type": "clear cell renal clear cell carcinoma",
         "manifest_url": None,  # None for default
@@ -11,6 +12,7 @@ tcia_dataset_to_info = {
         "xdim,ydim,zdim_unmasked": (625, 625, 200)  # dimensions to standardize to when do_masking is False - set to (None, None, None) to use 95th percentile of extents across all series
     },
     "tcga-lihc": {
+        "project": "tcga",
         "cancer_organ": "liver",
         "cancer_type": "hepatocellular carcinoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/doiJNLP-TCGA-LIHC-01-30-2017.tcia",  # None for default
@@ -19,6 +21,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 400),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     "tcga-blca": {
+        "project": "tcga",
         "cancer_organ": "bladder",
         "cancer_type": "urothelial carcinoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCGA-BLCA-August-30-2019-NBIA-manifest.tcia",  # None for default
@@ -27,6 +30,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     # "tcga-brca": {
+    #     "project": "tcga",
     #     "cancer_organ": "breast",
     #     "cancer_type": "breast invasive carcinoma",
     #     "manifest_url": None,  # None for default
@@ -36,6 +40,7 @@ tcia_dataset_to_info = {
     #     "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     # },
     "tcga-cesc": {
+        "project": "tcga",
         "cancer_organ": "cervix",
         "cancer_type": "cervical squamous cell carcinoma",
         "manifest_url": None,  # None for default
@@ -44,6 +49,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     "tcga-coad": {
+        "project": "tcga",
         "cancer_organ": "colon",
         "cancer_type": "colon adenocarcinoma",
         "manifest_url": None,  # None for default
@@ -52,6 +58,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     "tcga-esca": {
+        "project": "tcga",
         "cancer_organ": "esophagus",
         "cancer_type": "esophageal carcinoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA_TCGA-ESCA-09-16-2015.tcia",  # None for default
@@ -60,6 +67,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     # "tcga-gbm": {
+    #     "project": "tcga",
     #     "cancer_organ": "brain",
     #     "cancer_type": "glioblastoma multiforme",
     #     "manifest_url": None,  # None for default
@@ -68,6 +76,7 @@ tcia_dataset_to_info = {
     #     "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     # },
     # "tcga-hnsc": {
+    #     "project": "tcga",
     #     "cancer_organ": "head_neck",
     #     "cancer_type": "head and neck squamous cell carcinoma",
     #     "manifest_url": None,  # None for default
@@ -76,6 +85,7 @@ tcia_dataset_to_info = {
     #     "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     # },
     "tcga-kich": {
+        "project": "tcga",
         "cancer_organ": "kidney",
         "cancer_type": "chromophobe renal cell carcinoma",
         "manifest_url": None,  # None for default
@@ -84,6 +94,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     "tcga-kirp": {
+        "project": "tcga",
         "cancer_organ": "kidney",
         "cancer_type": "papillary renal cell carcinoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/doiJNLP-TCGA-KIRP-01-30-2017.tcia",  # None for default
@@ -92,6 +103,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     # "tcga-lgg": {
+    #     "project": "tcga",
     #     "cancer_organ": "brain",
     #     "cancer_type": "lower grade glioma",
     #     "manifest_url": None,  # None for default
@@ -100,6 +112,7 @@ tcia_dataset_to_info = {
     #     "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     # },
     "tcga-luad": {
+        "project": "tcga",
         "cancer_organ": "lung",
         "cancer_type": "lung adenocarcinoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/doiJNLP-TCGA-LUAD-01-30-2017.tcia",  # None for default
@@ -108,6 +121,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-1000, 400),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     "tcga-lusc": {
+        "project": "tcga",
         "cancer_organ": "lung",
         "cancer_type": "lung squamous cell carcinoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/doiJNLP-TCGA-LUSC-01-30-2017.tcia",  # None for default
@@ -116,6 +130,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-1000, 400),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     "tcga-ov": {
+        "project": "tcga",
         "cancer_organ": "ovary",
         "cancer_type": "ovarian serous cystadenocarcinoma",
         "manifest_url": None,  # None for default
@@ -124,6 +139,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     "tcga-prad": {
+        "project": "tcga",
         "cancer_organ": "prostate",
         "cancer_type": "prostate adenocarcinoma",
         "manifest_url": None,  # None for default
@@ -132,6 +148,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     "tcga-read": {
+        "project": "tcga",
         "cancer_organ": "rectum",
         "cancer_type": "rectum adenocarcinoma",
         "manifest_url": None,  # None for default
@@ -140,6 +157,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     "tcga-stad": {
+        "project": "tcga",
         "cancer_organ": "stomach",
         "cancer_type": "stomach adenocarcinoma",
         "manifest_url": None,  # None for default
@@ -148,6 +166,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     "tcga-ucec": {
+        "project": "tcga",
         "cancer_organ": "uterus",
         "cancer_type": "uterine corpus endometrial carcinoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA_TCGA-UCEC-2018-10-24.tcia",  # None for default
@@ -156,6 +175,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     },
     "cptac-ccrcc": {
+        "project": "cptac",
         "cancer_organ": "kidney",
         "cancer_type": "clear cell renal cell carcinoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-CCRCC_v11_20230818.tcia",
@@ -164,6 +184,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),
     },
     # "cptac-ucec": {
+    #     "project": "cptac",
     #     "cancer_organ": "uterus",
     #     "cancer_type": "uterine corpus endometrial carcinoma",
     #     "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-UCEC_v12_20240405b.tcia",
@@ -172,6 +193,7 @@ tcia_dataset_to_info = {
     #     "clip_min,clip_max": (-200, 300),
     # },
     "cptac-luad": {
+        "project": "cptac",
         "cancer_organ": "lung",
         "cancer_type": "lung adenocarcinoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-LUAD_v13_20250801.tcia",
@@ -180,6 +202,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-1000, 400),
     },
     "cptac-lscc": {
+        "project": "cptac",
         "cancer_organ": "lung",
         "cancer_type": "lung squamous cell carcinoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-LSCC_v15.tcia",
@@ -188,6 +211,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-1000, 400),
     },
     # "cptac-hnscc": {
+    #     "project": "cptac",
     #     "cancer_organ": "head_neck",
     #     "cancer_type": "head and neck squamous cell carcinoma",
     #     "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-HNSCC_v19_20250226.tcia",
@@ -196,6 +220,7 @@ tcia_dataset_to_info = {
     #     "clip_min,clip_max": (-1000, 400),
     # },
     # "cptac-gbm": {
+    #     "project": "cptac",
     #     "cancer_organ": "brain",
     #     "cancer_type": "glioblastoma multiforme",
     #     "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-GBM_v16_20240708.tcia",
@@ -204,6 +229,7 @@ tcia_dataset_to_info = {
     #     "clip_min,clip_max": (-200, 300),
     # },
     "cptac-aml": {
+        "project": "cptac",
         "cancer_organ": "blood",
         "cancer_type": "acute myeloid leukemia",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/CPTAC-AML_V5_20250415-1.tcia",
@@ -212,6 +238,7 @@ tcia_dataset_to_info = {
         "clip_min,clip_max": (-200, 300),
     },
     # "cptac-stad": {
+    #     "project": "cptac",
     #     "cancer_organ": "stomach",
     #     "cancer_type": "stomach adenocarcinoma",
     #     "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/CPTAC-STAD_v1_20260304.tcia",
@@ -219,7 +246,8 @@ tcia_dataset_to_info = {
     #     "totalsegmentator_organs": ["stomach"],
     #     "clip_min,clip_max": (-200, 300),
     # },
-    "cptac-pda": {  # pancreatic ductal adenocarcinoma
+    "cptac-pda": {
+        "project": "cptac",
         "cancer_organ": "pancreas",
         "cancer_type": "pancreatic ductal adenocarcinoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-PDA_v15_20250226.tcia",
@@ -227,7 +255,8 @@ tcia_dataset_to_info = {
         "totalsegmentator_organs": ["pancreas"],
         "clip_min,clip_max": (-200, 300),
     },
-    "cptac-cm": {  # cutaneous melanoma
+    "cptac-cm": {
+        "project": "cptac",
         "cancer_organ": "skin",
         "cancer_type": "cutaneous melanoma",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-CM_v11_20240429.tcia",

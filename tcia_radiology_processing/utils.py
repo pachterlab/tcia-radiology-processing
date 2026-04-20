@@ -775,12 +775,12 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
                 try:
                     logger.info(f"Attempting manual DICOM to NIfTI conversion for {case_id}, Series UID {series_uid}")
                     dcm2nii_manual(dicom_folder, os.path.join(case_outdir, f"{series_uid}.nii.gz"), gzip=True)  #!!! check this
-                    breakpoint()
+                    # breakpoint()
                     manually_created_niftis.append(case_id)
                 except Exception as e2:
                     logger.error(f"Manual conversion failed for {case_id}, Series UID {series_uid}: {e2}")
                     no_niftis.append(case_id)
-                    breakpoint()
+                    # breakpoint()
                     continue
 
         # Rename to imaging.nii.gz
@@ -842,7 +842,7 @@ def convert_dcm_to_nii_and_organize(imaging_dcm_dir, imaging_metadata_df, nifti_
                         no_niftis.append(case_id)
                         continue
                 logger.warning(f"Series UID {series_uid} imaging not converted to nifti for {case_id}")
-                breakpoint()
+                # breakpoint()
 
         # -------------------
         # Segmentation conversion
@@ -1857,7 +1857,7 @@ def apply_mask(image_file, mask_file, label=None, crop=True, min_value=None, pad
     mask_nii = load_nifti_file(mask_file)
 
     image_data = image_nii.get_fdata()
-    mask_data = mask_nii.get_fdata().astype(np.int16)
+    mask_data = np.rint(mask_nii.get_fdata()).astype(np.int16)
 
     if image_data.shape != mask_data.shape:
         raise ValueError(f"Image and mask shapes do not match: {image_data.shape} vs {mask_data.shape}")
@@ -2013,11 +2013,32 @@ def choose_slice_with_most_mask_single_image(image, mask, mask_value=2, out_imag
     # sanity check for matching shapes
     if img.shape != mask_arr.shape:
         raise ValueError(f"Image and mask shapes do not match: {img.shape} vs {mask_arr.shape}")
+    
+    # --------------------------------------------------
+    # Identify mask voxels
+    # --------------------------------------------------
+    if isinstance(mask_value, (list, tuple, set)):
+        selected_mask = np.isin(mask_arr, list(mask_value))
+        mask_value_str = ",".join(map(str, mask_value))
+    else:
+        selected_mask = (mask_arr == mask_value)
+        mask_value_str = str(mask_value)
+
 
     # check if mask_value exists in mask
     if (isinstance(mask_value, (list, tuple, set)) and not np.isin(mask_value, mask_arr).any()) or (not isinstance(mask_value, (list, tuple, set)) and mask_value not in mask_arr):
-            logger.warning(f"None of the specified mask values {mask_value} found in mask. Returning None.")
-            return None, 0, {}
+            logger.warning(f"None of the specified mask values {mask_value} found in mask. Returning empty.")
+            # return None, 0, {}
+            best_slice_idx = 0
+            tumor_pixels_in_best_slice = 0
+
+            slice_info = {
+                f"slice_with_most_mask_{mask_value_str}": best_slice_idx,
+                f"number_of_{mask_value_str}_mask_pixels_in_best_slice": 0,
+            }
+
+            img_slice = img[:, :, best_slice_idx]
+            mask_slice = np.zeros_like(img_slice)
 
     # check if image only has one slice (2D image)
     if img.ndim == 2 or (img.ndim == 3 and img.shape[2] == 1):
@@ -2040,24 +2061,23 @@ def choose_slice_with_most_mask_single_image(image, mask, mask_value=2, out_imag
         return out_img_path, out_mask_path, slice_info
     
 
-    
-    # --------------------------------------------------
-    # Identify mask voxels
-    # --------------------------------------------------
-    if isinstance(mask_value, (list, tuple, set)):
-        selected_mask = np.isin(mask_arr, list(mask_value))
-        mask_value_str = ",".join(map(str, mask_value))
-    else:
-        selected_mask = (mask_arr == mask_value)
-        mask_value_str = str(mask_value)
-
     # --------------------------------------------------
     # Compute mask area per slice
     # --------------------------------------------------
     mask_area_per_slice = selected_mask.sum(axis=(0, 1))
 
     if mask_area_per_slice.max() == 0:
-        return None, 0
+        # return None, 0
+        best_slice_idx = 0
+        tumor_pixels_in_best_slice = 0
+
+        slice_info = {
+            f"slice_with_most_mask_{mask_value_str}": best_slice_idx,
+            f"number_of_{mask_value_str}_mask_pixels_in_best_slice": 0,
+        }
+
+        img_slice = img[:, :, best_slice_idx]
+        mask_slice = np.zeros_like(img_slice)
 
     best_slice_idx = int(np.argmax(mask_area_per_slice))
     tumor_pixels_in_best_slice = int(mask_area_per_slice[best_slice_idx])
@@ -2747,7 +2767,8 @@ def check_and_delete_bad_niftis(
     metadata_df,
     nifti_dir,
     is_4d=True,
-    min_z=10,
+    min_z=15,
+    max_in_plane_aniso=4,
     max_zoom_maximum=20,
     filter_from_metadata=True,
     image_filename="imaging.nii.gz",
@@ -2767,6 +2788,7 @@ def check_and_delete_bad_niftis(
             "is_thin": False,
             "is_missing": False,
             "max_zoom": np.nan,
+            "in_plane_aniso": np.nan,
             "orientation_original": np.nan,
             "sampling_original": np.nan,
             "max_zoom_not_in_si_position": False,
@@ -2799,6 +2821,16 @@ def check_and_delete_bad_niftis(
             status_rows.append(case_status)
             continue
         
+        if max_in_plane_aniso is not None:
+            spacing_oriented = np.array(nib.as_closest_canonical(img_nii).header.get_zooms()[:3], dtype=float)
+            x, y, _ = spacing_oriented
+            if min(x, y) > 0:
+                in_plane_aniso = max(x, y) / min(x, y)
+                case_status["in_plane_aniso"] = float(in_plane_aniso)
+            else:
+                in_plane_aniso = np.inf
+                case_status["in_plane_aniso"] = np.inf
+        
         is_4d_case = (img.ndim == 4)
         case_status["is_4d"] = is_4d_case
         orientation_original = nib.orientations.aff2axcodes(img_nii.affine)
@@ -2821,6 +2853,10 @@ def check_and_delete_bad_niftis(
                 logger.warning(f"Case {case_id} has at least one zoom value above the maximum threshold of {max_zoom_maximum}. This case will be removed from the dataset.")
                 if os.path.exists(case_dir):
                     shutil.rmtree(case_dir, ignore_errors=True)
+        if max_in_plane_aniso is not None and case_status["in_plane_aniso"] > max_in_plane_aniso:
+            logger.warning(f"Case {case_id} has in-plane anisotropy {case_status['in_plane_aniso']:.2f}, which is above the maximum threshold of {max_in_plane_aniso}. This case will be removed from the dataset.")
+            if os.path.exists(case_dir):
+                shutil.rmtree(case_dir, ignore_errors=True)
 
         status_rows.append(case_status)
 
@@ -2833,6 +2869,7 @@ def check_and_delete_bad_niftis(
         "orientation_original",
         "sampling_original",
         "max_zoom_not_in_si_position",
+        "in_plane_aniso",
     ]
     drop_cols = [c for c in status_cols if c in metadata_df.columns]
     if drop_cols:
@@ -2848,6 +2885,10 @@ def check_and_delete_bad_niftis(
             metadata_df["max_zoom"] = metadata_df["max_zoom"].fillna(0)  # if missing zoom info, assume it's 0 which is below any reasonable threshold
             max_zoom_dict = dict(zip(metadata_df["series_id"], metadata_df["max_zoom"]))
             metadata_df = metadata_df[metadata_df["max_zoom"] <= max_zoom_maximum].copy()  # filter out series with zoom values exceeding the maximum threshold from metadata if they were deleted from dataset
+        if max_in_plane_aniso is not None:
+            metadata_df["in_plane_aniso"] = metadata_df["in_plane_aniso"].replace([np.inf, -np.inf], np.nan)
+            metadata_df["in_plane_aniso"] = metadata_df["in_plane_aniso"].fillna(0)  # if missing anisotropy info, assume isotropic and keep
+            metadata_df = metadata_df[metadata_df["in_plane_aniso"] <= max_in_plane_aniso].copy()
         if filter_if_max_zoom_not_in_si_position:
             metadata_df = metadata_df[~metadata_df["max_zoom_not_in_si_position"].fillna(False)].copy()
 
@@ -2861,7 +2902,8 @@ def check_and_delete_bad_niftis(
                 f"Flags: '4D': {int(status_df['is_4d'].fillna(False).sum())}, "
                 f"'thin': {int(status_df['is_thin'].fillna(False).sum())}, "
                 f"'missing': {int(status_df['is_missing'].fillna(False).sum())}, "
-                f"'zooms': {len(max_zoom_dict)}"
+                f"'zooms': {len(max_zoom_dict)}, "
+                f"'in_plane_aniso': {int((status_df['in_plane_aniso'] > max_in_plane_aniso).fillna(False).sum()) if max_in_plane_aniso is not None else 0}"
             )
     if out:
         metadata_df.to_csv(out, index=False)
