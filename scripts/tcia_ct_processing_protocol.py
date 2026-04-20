@@ -217,7 +217,7 @@ def main():
             print(f"convert_dcm_to_nii_and_organize metrics: {utils.convert_dcm_to_nii_and_organize.last_metrics}")
 
             # filter out 4D volumes and niis with big max zoom (sometimes some series will have an axial localizer but an otherwise coronal/sagittal series - we want to exclude these)
-            metadata_df = utils.check_and_delete_bad_niftis(metadata_df, nifti_dir, image_filename=image_filename, is_4d=True, min_z=25, max_zoom_maximum=20, filter_if_max_zoom_not_in_si_position=False, out=imaging_metadata_csv)
+            metadata_df = utils.check_and_delete_bad_niftis(metadata_df, nifti_dir, image_filename=image_filename, is_4d=True, min_z=25, max_in_plane_aniso=4, max_zoom_maximum=20, filter_if_max_zoom_not_in_si_position=False, out=imaging_metadata_csv)
             utils.print_tcia_info(metadata_df, project=dataset)
     else:
         metadata_name = f"metadata_usc_{num_series}.csv" if num_series is not None else "metadata_usc.csv"
@@ -288,53 +288,56 @@ def main():
         clipped_image_files, resampled_image_files, resampled_mask_files, slice_image_files, slice_mask_files, masked_image_files, masked_mask_files, final_image_files, final_mask_files = [], [], [], [], [], [], [], [], []
         clip_metrics, resample_metrics, slice_selection_metrics, masking_metrics = None, None, None, None
         for series_id in tqdm(sorted(os.listdir(nifti_dir)), desc="Processing images"):
-            series_dir = os.path.join(nifti_dir, series_id)
-            image_file = os.path.join(series_dir, image_filename)
-            mask_file = os.path.join(series_dir, mask_filename) if mask_filename else ""
-            if not os.path.exists(image_file):
-                print(f"Image file not found for series_id {series_id} at {image_file}. Skipping.")
-                continue
-            
-            if clip:
-                if clip_min is None and clip_max is None:  # eg (-200, 300) for soft tissue window - done in training loop
-                    raise ValueError(f"clip_min and clip_max cannot both be None if clip is True. Got clip_min={clip_min}, clip_max={clip_max}.")
-                print(f"Clipping intensity range for image file for series_id {series_id} at {image_file} with clip_min={clip_min}, clip_max={clip_max}.")
-                image_file = utils.clip_intensity_range(image_file, clip_min=clip_min, clip_max=clip_max, out=True)
-                clipped_image_files.append(image_file)
-                print(f"Clipped intensity range for image file for series_id {series_id} at {image_file} with clip_min={clip_min}, clip_max={clip_max}.")
-                clip_metrics = utils.add_metrics(total=clip_metrics, metrics=utils.clip_intensity_range.last_metrics)
+            try:
+                series_dir = os.path.join(nifti_dir, series_id)
+                image_file = os.path.join(series_dir, image_filename)
+                mask_file = os.path.join(series_dir, mask_filename) if mask_filename else ""
+                if not os.path.exists(image_file):
+                    print(f"Image file not found for series_id {series_id} at {image_file}. Skipping.")
+                    continue
+                
+                if clip:
+                    if clip_min is None and clip_max is None:  # eg (-200, 300) for soft tissue window - done in training loop
+                        raise ValueError(f"clip_min and clip_max cannot both be None if clip is True. Got clip_min={clip_min}, clip_max={clip_max}.")
+                    image_file = utils.clip_intensity_range(image_file, clip_min=clip_min, clip_max=clip_max, out=True)
+                    clipped_image_files.append(image_file)
+                    print(f"Clipped intensity range for image file for series_id {series_id} at {image_file} with clip_min={clip_min}, clip_max={clip_max}.")
+                    clip_metrics = utils.add_metrics(total=clip_metrics, metrics=utils.clip_intensity_range.last_metrics)
 
-            if resample:
-                image_file = utils.resample_image(image_file, target_spacing=(0.8, 0.8, 3.0), is_label=False, out=True)
-                resampled_image_files.append(image_file)
-                print(f"Resampled image file for series_id {series_id} at {image_file}.")
-                resample_metrics = utils.add_metrics(total=resample_metrics, metrics=utils.resample_image.last_metrics)
-                if os.path.exists(mask_file):
-                    mask_file = utils.resample_image(mask_file, target_spacing=(0.8, 0.8, 3.0), is_label=True, out=True)
-                    resampled_mask_files.append(mask_file)
+                if resample:
+                    image_file = utils.resample_image(image_file, target_spacing=(0.8, 0.8, 3.0), is_label=False, out=True)
+                    resampled_image_files.append(image_file)
+                    print(f"Resampled image file for series_id {series_id} at {image_file}.")
                     resample_metrics = utils.add_metrics(total=resample_metrics, metrics=utils.resample_image.last_metrics)
-            
-            if image_dimensionality == "2D":
-                if not os.path.exists(mask_file):
-                    raise ValueError(f"Mask file not found for series_id {series_id} at {mask_file}. Cannot select slice with most mask without mask file.")
+                    if os.path.exists(mask_file):
+                        mask_file = utils.resample_image(mask_file, target_spacing=(0.8, 0.8, 3.0), is_label=True, out=True)
+                        resampled_mask_files.append(mask_file)
+                        resample_metrics = utils.add_metrics(total=resample_metrics, metrics=utils.resample_image.last_metrics)
+                
+                if image_dimensionality == "2D":
+                    if not os.path.exists(mask_file):
+                        raise ValueError(f"Mask file not found for series_id {series_id} at {mask_file}. Cannot select slice with most mask without mask file.")
 
-                image_file, mask_file, slice_info = utils.choose_slice_with_most_mask_single_image(image=image_file, mask=mask_file, mask_value=mask_value_for_best_slice_selection, out_image=True, out_mask=True)
-                slice_image_files.append(image_file)
-                slice_mask_files.append(mask_file)
-                slice_info["series_id"] = series_id
-                slice_info_list.append(slice_info)
-                slice_selection_metrics = utils.add_metrics(total=slice_selection_metrics, metrics=utils.choose_slice_with_most_mask_single_image.last_metrics)
-            
-            if do_masking and os.path.exists(mask_file):
-                image_file, mask_file = utils.apply_mask(image_file, mask_file, label=mask_values, min_value=clip_min, crop=True, pad_after_crop=5, out_image=True, out_mask=True)
-                masked_image_files.append(image_file)
-                masked_mask_files.append(mask_file)
-                masking_metrics = utils.add_metrics(total=masking_metrics, metrics=utils.apply_mask.last_metrics)
-                print(f"Applied masking to image file for series_id {series_id} at {image_file} using mask file at {mask_file} with mask values {mask_values}.")
+                    image_file, mask_file, slice_info = utils.choose_slice_with_most_mask_single_image(image=image_file, mask=mask_file, mask_value=mask_value_for_best_slice_selection, out_image=True, out_mask=True)
+                    slice_image_files.append(image_file)
+                    slice_mask_files.append(mask_file)
+                    slice_info["series_id"] = series_id
+                    slice_info_list.append(slice_info)
+                    slice_selection_metrics = utils.add_metrics(total=slice_selection_metrics, metrics=utils.choose_slice_with_most_mask_single_image.last_metrics)
+                
+                if do_masking and os.path.exists(mask_file):
+                    image_file, mask_file = utils.apply_mask(image_file, mask_file, label=mask_values, min_value=clip_min, crop=True, pad_after_crop=5, out_image=True, out_mask=True)
+                    masked_image_files.append(image_file)
+                    masked_mask_files.append(mask_file)
+                    masking_metrics = utils.add_metrics(total=masking_metrics, metrics=utils.apply_mask.last_metrics)
+                    print(f"Applied masking to image file for series_id {series_id} at {image_file} using mask file at {mask_file} with mask values {mask_values}.")
 
-            final_image_files.append(image_file)
-            if mask_filename:
-                final_mask_files.append(mask_file)
+                final_image_files.append(image_file)
+                if mask_filename:
+                    final_mask_files.append(mask_file)
+            
+            except Exception as e:
+                print(f"Error processing series_id {series_id}: {e}. Skipping this series.")
 
         image_filename_set = set([os.path.basename(f) for f in final_image_files])
         assert len(image_filename_set) == 1, f"Expected all image files to have the same filename, but found: {image_filename_set}"

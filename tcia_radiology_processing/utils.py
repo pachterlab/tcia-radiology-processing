@@ -2896,6 +2896,7 @@ def check_and_delete_bad_niftis(
         num_cases_after = len(metadata_df)
         logger.info(f"Filtered out {num_cases_original - num_cases_after} / {num_cases_original} cases from metadata based on missing files, 4D images, or excessive zoom values. Remaining cases: {num_cases_after}.")
         removed_cases = series_ids_original - set(metadata_df["series_id"].unique())
+        removed_cases = sorted(removed_cases)
         if removed_cases:
             logger.info(f"Removed cases: {', '.join(removed_cases)}")
             logger.info(
