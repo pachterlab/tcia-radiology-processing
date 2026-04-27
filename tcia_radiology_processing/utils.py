@@ -1293,7 +1293,9 @@ def run_totalsegmentator(nifti_dir, selected_segmentations, metadata_csv=None, m
         raise ValueError("selected_segmentations must be a non-empty list of segmentation names to include in the combined mask.")
 
     if metadata_csv is not None:
-        if isinstance(metadata_csv, str) and os.path.exists(metadata_csv):
+        if isinstance(metadata_csv, str):
+            if not os.path.exists(metadata_csv):
+                raise FileNotFoundError(f"Metadata CSV file {metadata_csv} not found.")
             metadata_df = pd.read_csv(metadata_csv)
         elif isinstance(metadata_csv, pd.DataFrame):
             metadata_df = metadata_csv
@@ -2821,18 +2823,22 @@ def check_and_delete_bad_niftis(
             status_rows.append(case_status)
             continue
         
-        if max_in_plane_aniso is not None:
-            spacing_oriented = np.array(nib.as_closest_canonical(img_nii).header.get_zooms()[:3], dtype=float)
-            x, y, _ = spacing_oriented
-            if min(x, y) > 0:
-                in_plane_aniso = max(x, y) / min(x, y)
-                case_status["in_plane_aniso"] = float(in_plane_aniso)
-            else:
-                in_plane_aniso = np.inf
-                case_status["in_plane_aniso"] = np.inf
-        
         is_4d_case = (img.ndim == 4)
         case_status["is_4d"] = is_4d_case
+        
+        if max_in_plane_aniso is not None:
+            if img.ndim <= 3:
+                spacing_oriented = np.array(nib.as_closest_canonical(img_nii).header.get_zooms()[:3], dtype=float)
+                x, y, _ = spacing_oriented
+                if min(x, y) > 0:
+                    in_plane_aniso = max(x, y) / min(x, y)
+                    case_status["in_plane_aniso"] = float(in_plane_aniso)
+                else:
+                    case_status["in_plane_aniso"] = np.inf
+            else:
+                case_status["in_plane_aniso"] = np.inf  # cannot compute anisotropy for 4D images, skip this check
+
+
         orientation_original = nib.orientations.aff2axcodes(img_nii.affine)
         sampling_original = img_nii.header.get_zooms()
         case_status["orientation_original"] = orientation_original

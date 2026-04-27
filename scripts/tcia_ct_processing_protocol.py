@@ -118,7 +118,7 @@ def main():
             
             # add short patient ID
             imaging_metadata_df = pd.read_excel(additional_metadata_xlsx)
-            imaging_metadata_df.insert(0, "series_id", [f"series_{i:05d}" for i in range(len(imaging_metadata_df))])
+            imaging_metadata_df.insert(0, "series_id", [f"{dataset.replace('-', '_')}_series_{i:05d}" for i in range(len(imaging_metadata_df))])
             imaging_metadata_df["project"] = project
             imaging_metadata_df["subproject"] = dataset
             imaging_metadata_df["cancer_organ"] = tcia_dataset_to_info[dataset]["cancer_organ"]
@@ -207,6 +207,9 @@ def main():
         metadata_df = metadata_df[metadata_df["Modality"] == "CT"]
         utils.print_tcia_info(metadata_df, project=dataset)
 
+        if len(metadata_df) == 0:
+            raise ValueError("No viable CT series found after filtering. Please check the metadata and filtering criteria.")
+
         image_filename = "imaging.nii.gz"
         tumor_mask_filename = None
         nifti_dir_name = f"nifti_{num_series}" if num_series is not None else "nifti"
@@ -219,6 +222,9 @@ def main():
             # filter out 4D volumes and niis with big max zoom (sometimes some series will have an axial localizer but an otherwise coronal/sagittal series - we want to exclude these)
             metadata_df = utils.check_and_delete_bad_niftis(metadata_df, nifti_dir, image_filename=image_filename, is_4d=True, min_z=25, max_in_plane_aniso=4, max_zoom_maximum=20, filter_if_max_zoom_not_in_si_position=False, out=imaging_metadata_csv)
             utils.print_tcia_info(metadata_df, project=dataset)
+
+            if len(metadata_df) == 0:
+                raise ValueError("No viable CT series found after filtering out bad nifti files. Please check the metadata and filtering criteria.")
     else:
         metadata_name = f"metadata_usc_{num_series}.csv" if num_series is not None else "metadata_usc.csv"
         imaging_metadata_csv = os.path.join(data_dir, metadata_name)

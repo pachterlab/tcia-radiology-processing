@@ -39,15 +39,15 @@ tcia_dataset_to_info = {
     #     "totalsegmentator_task": "breasts",  # None/omit for total
     #     "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
     # },
-    "tcga-cesc": {
-        "project": "tcga",
-        "cancer_organ": "cervix",
-        "cancer_type": "cervical squamous cell carcinoma",
-        "manifest_url": None,  # None for default
-        "metadata_url": None,  # None for default
-        "totalsegmentator_organs": [],
-        "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
-    },
+    # "tcga-cesc": {
+    #     "project": "tcga",
+    #     "cancer_organ": "cervix",
+    #     "cancer_type": "cervical squamous cell carcinoma",
+    #     "manifest_url": None,  # None for default
+    #     "metadata_url": None,  # None for default
+    #     "totalsegmentator_organs": [],
+    #     "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
+    # },
     "tcga-coad": {
         "project": "tcga",
         "cancer_organ": "colon",
