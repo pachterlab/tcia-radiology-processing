@@ -2028,19 +2028,19 @@ def choose_slice_with_most_mask_single_image(image, mask, mask_value=2, out_imag
 
 
     # check if mask_value exists in mask
+    print("I'm pickled rick!!!")
     if (isinstance(mask_value, (list, tuple, set)) and not np.isin(mask_value, mask_arr).any()) or (not isinstance(mask_value, (list, tuple, set)) and mask_value not in mask_arr):
-            logger.warning(f"None of the specified mask values {mask_value} found in mask. Returning empty.")
-            # return None, 0, {}
-            best_slice_idx = 0
-            tumor_pixels_in_best_slice = 0
+        print("pickled rickkkkkk!!!")
+        logger.warning(f"None of the specified mask values {mask_value} found in mask. Returning empty.")
+        # return None, 0, {}
 
-            slice_info = {
-                f"slice_with_most_mask_{mask_value_str}": best_slice_idx,
-                f"number_of_{mask_value_str}_mask_pixels_in_best_slice": 0,
-            }
+        slice_info = {
+            f"slice_with_most_mask_{mask_value_str}": 0,
+            f"number_of_{mask_value_str}_mask_pixels_in_best_slice": 0,
+        }
 
-            img_slice = img[:, :, best_slice_idx]
-            mask_slice = np.zeros_like(img_slice)
+        img_slice = img[:, :, 0]
+        mask_slice = np.zeros_like(img_slice)
 
     # check if image only has one slice (2D image)
     if img.ndim == 2 or (img.ndim == 3 and img.shape[2] == 1):

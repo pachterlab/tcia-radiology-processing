@@ -83,7 +83,7 @@ def main():
     create_organ_masks = False
     if do_masking or do_radiomics or image_dimensionality == "2D":
         create_organ_masks = True
-    if create_organ_masks and tcia_dataset_to_info[dataset].get("totalsegmentator_organs") is None:
+    if create_organ_masks and not tcia_dataset_to_info[dataset].get("totalsegmentator_organs"):
         raise ValueError(f"Selected segmentations not specified for dataset {dataset}. Please specify the segmentations to use for this dataset in tcia_dataset_to_info.")
 
     data_dir = os.path.join(data_dir_base, project, dataset, "imaging")
@@ -324,11 +324,12 @@ def main():
                     if not os.path.exists(mask_file):
                         raise ValueError(f"Mask file not found for series_id {series_id} at {mask_file}. Cannot select slice with most mask without mask file.")
 
-                    image_file, mask_file, slice_info = utils.choose_slice_with_most_mask_single_image(image=image_file, mask=mask_file, mask_value=mask_value_for_best_slice_selection, out_image=True, out_mask=True)
+                    image_file, mask_file, slice_info = utils.choose_slice_with_most_mask_single_image(image=image_file, mask=mask_file, mask_value=mask_value_for_best_slice_selection, out_image=True, out_mask=True)  # slice_info will be empty unless I set overwrite=True
                     slice_image_files.append(image_file)
                     slice_mask_files.append(mask_file)
                     slice_info["series_id"] = series_id
                     slice_info_list.append(slice_info)
+                    print(f"Selected slice with most mask for series_id {series_id} at {image_file} using mask file at {mask_file} with mask value {mask_value_for_best_slice_selection}.")
                     slice_selection_metrics = utils.add_metrics(total=slice_selection_metrics, metrics=utils.choose_slice_with_most_mask_single_image.last_metrics)
                 
                 if do_masking and os.path.exists(mask_file):
@@ -428,7 +429,7 @@ def main():
 
 
 
-    convert_to_npy = True if (not do_radiomics and do_masking) else False  # convert to npy if we're not doing radiomics (radiomics wants nifti) AND we are doing masking (omitting masking creates massive files)
+    convert_to_npy = False  # True if (not do_radiomics and do_masking) else False  # convert to npy if we're not doing radiomics (radiomics wants nifti) AND we are doing masking (omitting masking creates massive files)
 
     # image_filename_nii, mask_filename_nii = image_filename, mask_filename
     if convert_to_npy:

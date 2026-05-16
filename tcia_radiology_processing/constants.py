@@ -4,6 +4,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "kidney",
         "cancer_type": "clear cell renal clear cell carcinoma",
+        "ONCOTREE_CODE": "KIDNEY",
         "manifest_url": None,  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": ["kidney_left", "kidney_right"],
@@ -15,6 +16,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "liver",
         "cancer_type": "hepatocellular carcinoma",
+        "ONCOTREE_CODE": "LIVER",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/doiJNLP-TCGA-LIHC-01-30-2017.tcia",  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": ["liver"],
@@ -24,6 +26,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "bladder",
         "cancer_type": "urothelial carcinoma",
+        "ONCOTREE_CODE": "BLADDER",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCGA-BLCA-August-30-2019-NBIA-manifest.tcia",  # None for default
         "metadata_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCGA-BLCA-August-30-2019-NBIA-manifes-nbia-digest.xlsx",  # None for default
         "totalsegmentator_organs": ["urinary_bladder"],
@@ -33,6 +36,7 @@ tcia_dataset_to_info = {
     #     "project": "tcga",
     #     "cancer_organ": "breast",
     #     "cancer_type": "breast invasive carcinoma",
+    #     "ONCOTREE_CODE": "BREAST",
     #     "manifest_url": None,  # None for default
     #     "metadata_url": None,  # None for default
     #     "totalsegmentator_organs": ["breasts"],
@@ -43,6 +47,7 @@ tcia_dataset_to_info = {
     #     "project": "tcga",
     #     "cancer_organ": "cervix",
     #     "cancer_type": "cervical squamous cell carcinoma",
+    #     "ONCOTREE_CODE": "CERVIX",
     #     "manifest_url": None,  # None for default
     #     "metadata_url": None,  # None for default
     #     "totalsegmentator_organs": [],
@@ -52,6 +57,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "colon",
         "cancer_type": "colon adenocarcinoma",
+        "ONCOTREE_CODE": "BOWEL",
         "manifest_url": None,  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": ["colon"],
@@ -61,6 +67,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "esophagus",
         "cancer_type": "esophageal carcinoma",
+        "ONCOTREE_CODE": "ESOPHAGUS",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA_TCGA-ESCA-09-16-2015.tcia",  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": ["esophagus"],
@@ -70,6 +77,7 @@ tcia_dataset_to_info = {
     #     "project": "tcga",
     #     "cancer_organ": "brain",
     #     "cancer_type": "glioblastoma multiforme",
+    #     "ONCOTREE_CODE": "BRAIN",
     #     "manifest_url": None,  # None for default
     #     "metadata_url": None,  # None for default
     #     "totalsegmentator_organs": ["brain"],
@@ -79,6 +87,7 @@ tcia_dataset_to_info = {
     #     "project": "tcga",
     #     "cancer_organ": "head_neck",
     #     "cancer_type": "head and neck squamous cell carcinoma",
+    #     "ONCOTREE_CODE": "HEAD_NECK",
     #     "manifest_url": None,  # None for default
     #     "metadata_url": None,  # None for default
     #     "totalsegmentator_organs": ["skull"],
@@ -88,6 +97,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "kidney",
         "cancer_type": "chromophobe renal cell carcinoma",
+        "ONCOTREE_CODE": "KIDNEY",
         "manifest_url": None,  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": ["kidney_left", "kidney_right"],
@@ -97,6 +107,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "kidney",
         "cancer_type": "papillary renal cell carcinoma",
+        "ONCOTREE_CODE": "KIDNEY",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/doiJNLP-TCGA-KIRP-01-30-2017.tcia",  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": ["kidney_left", "kidney_right"],
@@ -106,6 +117,7 @@ tcia_dataset_to_info = {
     #     "project": "tcga",
     #     "cancer_organ": "brain",
     #     "cancer_type": "lower grade glioma",
+    #     "ONCOTREE_CODE": "BRAIN",
     #     "manifest_url": None,  # None for default
     #     "metadata_url": None,  # None for default
     #     "totalsegmentator_organs": ["brain"],
@@ -115,6 +127,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "lung",
         "cancer_type": "lung adenocarcinoma",
+        "ONCOTREE_CODE": "LUNG",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/doiJNLP-TCGA-LUAD-01-30-2017.tcia",  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": ["lung_upper_lobe_left", "lung_lower_lobe_left", "lung_upper_lobe_right", "lung_middle_lobe_right", "lung_lower_lobe_right"],
@@ -124,6 +137,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "lung",
         "cancer_type": "lung squamous cell carcinoma",
+        "ONCOTREE_CODE": "LUNG",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/doiJNLP-TCGA-LUSC-01-30-2017.tcia",  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": ["lung_upper_lobe_left", "lung_lower_lobe_left", "lung_upper_lobe_right", "lung_middle_lobe_right", "lung_lower_lobe_right"],
@@ -133,6 +147,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "ovary",
         "cancer_type": "ovarian serous cystadenocarcinoma",
+        "ONCOTREE_CODE": "OVARY",
         "manifest_url": None,  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": [],
@@ -142,7 +157,8 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "prostate",
         "cancer_type": "prostate adenocarcinoma",
-        "manifest_url": None,  # None for default
+        "ONCOTREE_CODE": "PROSTATE",
+        "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/doiJNLP-Pz8ET39p.tcia",  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": ["prostate"],
         "clip_min,clip_max": (-200, 300),  # (min, max) to clip pixel values to before resampling and feature extraction - set to (None, None) for no clipping
@@ -151,6 +167,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "rectum",
         "cancer_type": "rectum adenocarcinoma",
+        "ONCOTREE_CODE": "BOWEL",
         "manifest_url": None,  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": ["colon"],
@@ -160,6 +177,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "stomach",
         "cancer_type": "stomach adenocarcinoma",
+        "ONCOTREE_CODE": "STOMACH",
         "manifest_url": None,  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": ["stomach"],
@@ -169,6 +187,7 @@ tcia_dataset_to_info = {
         "project": "tcga",
         "cancer_organ": "uterus",
         "cancer_type": "uterine corpus endometrial carcinoma",
+        "ONCOTREE_CODE": "UTERUS",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA_TCGA-UCEC-2018-10-24.tcia",  # None for default
         "metadata_url": None,  # None for default
         "totalsegmentator_organs": [],
@@ -178,6 +197,7 @@ tcia_dataset_to_info = {
         "project": "cptac",
         "cancer_organ": "kidney",
         "cancer_type": "clear cell renal cell carcinoma",
+        "ONCOTREE_CODE": "KIDNEY",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-CCRCC_v11_20230818.tcia",
         "metadata_url": None,
         "totalsegmentator_organs": ["kidney_left", "kidney_right"],
@@ -187,6 +207,7 @@ tcia_dataset_to_info = {
     #     "project": "cptac",
     #     "cancer_organ": "uterus",
     #     "cancer_type": "uterine corpus endometrial carcinoma",
+    #     "ONCOTREE_CODE": "UTERUS",
     #     "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-UCEC_v12_20240405b.tcia",
     #     "metadata_url": None,  #!!! truly doesn't exist - TODO: make a custom one after downloading DICOMs
     #     "totalsegmentator_organs": [],
@@ -196,6 +217,7 @@ tcia_dataset_to_info = {
         "project": "cptac",
         "cancer_organ": "lung",
         "cancer_type": "lung adenocarcinoma",
+        "ONCOTREE_CODE": "LUNG",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-LUAD_v13_20250801.tcia",
         "metadata_url": None,
         "totalsegmentator_organs": ["lung_upper_lobe_left", "lung_lower_lobe_left", "lung_upper_lobe_right", "lung_middle_lobe_right", "lung_lower_lobe_right"],
@@ -205,6 +227,7 @@ tcia_dataset_to_info = {
         "project": "cptac",
         "cancer_organ": "lung",
         "cancer_type": "lung squamous cell carcinoma",
+        "ONCOTREE_CODE": "LUNG",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-LSCC_v15.tcia",
         "metadata_url": None,
         "totalsegmentator_organs": ["lung_upper_lobe_left", "lung_lower_lobe_left", "lung_upper_lobe_right", "lung_middle_lobe_right", "lung_lower_lobe_right"],
@@ -214,6 +237,7 @@ tcia_dataset_to_info = {
     #     "project": "cptac",
     #     "cancer_organ": "head_neck",
     #     "cancer_type": "head and neck squamous cell carcinoma",
+    #     "ONCOTREE_CODE": "HEAD_NECK",
     #     "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-HNSCC_v19_20250226.tcia",
     #     "metadata_url": None,
     #     "totalsegmentator_organs": ["lung_upper_lobe_left", "lung_lower_lobe_left", "lung_upper_lobe_right", "lung_middle_lobe_right", "lung_lower_lobe_right"],
@@ -223,6 +247,7 @@ tcia_dataset_to_info = {
     #     "project": "cptac",
     #     "cancer_organ": "brain",
     #     "cancer_type": "glioblastoma multiforme",
+    #     "ONCOTREE_CODE": "BRAIN",
     #     "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-GBM_v16_20240708.tcia",
     #     "metadata_url": None,
     #     "totalsegmentator_organs": ["brain"],
@@ -232,6 +257,7 @@ tcia_dataset_to_info = {
         "project": "cptac",
         "cancer_organ": "blood",
         "cancer_type": "acute myeloid leukemia",
+        "ONCOTREE_CODE": "MYELOID",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/CPTAC-AML_V5_20250415-1.tcia",
         "metadata_url": None,
         "totalsegmentator_organs": [],
@@ -241,6 +267,7 @@ tcia_dataset_to_info = {
     #     "project": "cptac",
     #     "cancer_organ": "stomach",
     #     "cancer_type": "stomach adenocarcinoma",
+    #     "ONCOTREE_CODE": "STOMACH",
     #     "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/CPTAC-STAD_v1_20260304.tcia",
     #     "metadata_url": None,  #!!! truly doesn't exist - TODO: make a custom one after downloading DICOMs
     #     "totalsegmentator_organs": ["stomach"],
@@ -250,6 +277,7 @@ tcia_dataset_to_info = {
         "project": "cptac",
         "cancer_organ": "pancreas",
         "cancer_type": "pancreatic ductal adenocarcinoma",
+        "ONCOTREE_CODE": "PANCREAS",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-PDA_v15_20250226.tcia",
         "metadata_url": None,
         "totalsegmentator_organs": ["pancreas"],
@@ -259,6 +287,7 @@ tcia_dataset_to_info = {
         "project": "cptac",
         "cancer_organ": "skin",
         "cancer_type": "cutaneous melanoma",
+        "ONCOTREE_CODE": "SKIN",
         "manifest_url": "https://www.cancerimagingarchive.net/wp-content/uploads/TCIA-CPTAC-CM_v11_20240429.tcia",
         "metadata_url": None,
         "totalsegmentator_organs": [],
