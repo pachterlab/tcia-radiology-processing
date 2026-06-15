@@ -8,6 +8,12 @@ Radiology image processing of TCGA/TCIA data.
 
 To run the code in this repository, follow these steps:
 
+Pypi:
+```
+pip install tcia-radiology-processing
+```
+
+GitHub:
 ```sh
 git clone https://github.com/pachterlab/tcia-radiology-processing.git
 cd tcia-radiology-processing
